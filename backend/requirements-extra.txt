@@ -1,0 +1,5 @@
+# Optional heavy ML / DL / backtest extras
+catboost==1.2.7
+vectorbt==0.26.2
+torch==2.5.1
+tensorflow==2.18.0

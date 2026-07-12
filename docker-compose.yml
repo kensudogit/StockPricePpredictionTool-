@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: stockai-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stockai_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-stockai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stockai} -d ${POSTGRES_DB:-stockai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: stockai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stockai-api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stockai}:${POSTGRES_PASSWORD:-stockai_secret}@postgres:5432/${POSTGRES_DB:-stockai}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-stockai}:${POSTGRES_PASSWORD:-stockai_secret}@postgres:5432/${POSTGRES_DB:-stockai}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - model_artifacts:/app/models/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stockai-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stockai}:${POSTGRES_PASSWORD:-stockai_secret}@postgres:5432/${POSTGRES_DB:-stockai}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-stockai}:${POSTGRES_PASSWORD:-stockai_secret}@postgres:5432/${POSTGRES_DB:-stockai}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - model_artifacts:/app/models/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stockai-beat
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stockai}:${POSTGRES_PASSWORD:-stockai_secret}@postgres:5432/${POSTGRES_DB:-stockai}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - worker
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: stockai-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  model_artifacts:

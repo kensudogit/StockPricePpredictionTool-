@@ -1,141 +1,123 @@
 # StockAI Agent Platform
 
 株価予測・SNS運用自動化の AI エージェント基盤です。  
-**データ収集 → 分析 → 予測 → 売買判断 → 自動発注（既定: ペーパー） → リスク管理 → 運用監視 → SNS下書き** を一連のパイプラインとして実装しています。
+**データ収集 → テクニカル/ファンダ/ニュース分析 → ML・DL予測 → 売買判断 → 自動発注 → リスク管理 → バックテスト → RAG** を統合しています。
 
 ## 技術スタック
 
 | 層 | 技術 |
 |---|---|
 | Backend | Python 3.12 / FastAPI / SQLAlchemy / Celery |
-| DB | PostgreSQL 16 |
+| DB | PostgreSQL 16 + **pgvector** |
 | Cache / Queue | Redis 7 |
-| Frontend | Next.js 15 / React 19 / TypeScript |
+| ML | scikit-learn / XGBoost / LightGBM / CatBoost |
+| DL | PyTorch（LSTM/GRU/Transformer/TFT）※ TensorFlow 任意 |
+| Backtest | pandas / Backtrader / vectorbt（Zipline はアダプタ） |
+| Frontend | Next.js 15 / React 19 / **ECharts / Chart.js / TradingView** |
 | Infra | Docker Compose |
 
-## アーキテクチャ
+## 実装機能マップ
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Next.js UI │────▶│  FastAPI API │────▶│ PostgreSQL  │
-└─────────────┘     └──────┬───────┘     └─────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │ Celery+Redis │  定期取込 / ウォッチリスト実行
-                    └──────┬───────┘
-                           │
-              ┌────────────▼────────────┐
-              │ Market Data Providers   │
-              │ Yahoo / AV / Polygon /  │
-              │ Finnhub / Twelve Data   │
-              │ (+ JPX/QUICK/BB stubs)  │
-              └─────────────────────────┘
-```
+### ニュース分析
+収集: 決算 / 適時開示・IR / 日経(proxy) / ロイター / Bloomberg(proxy) / SEC EDGAR / SNS  
+LLM: OpenAI / Claude / Gemini（未設定時はヒューリスティック）  
+API: `POST /api/v1/news/collect`, `POST /api/v1/news/analyze`, `POST /api/v1/news/{id}/enrich`
 
-## 収集対象データ
+### テクニカル分析
+トレンド（SMA/EMA/MACD/ADX）、オシレーター（RSI/Stoch/CCI）、ボラティリティ（ATR/BB）、出来高（VWAP/OBV）  
+API: `GET /api/v1/technical/{ticker}`
 
-- 株価・出来高（OHLCV）
-- 板情報（order book）※商用フィード接続時
-- 約定履歴（ticks）※商用フィード接続時
-- 信用残・空売り残高（`margin_short` テーブル / 手動・商用投入）
-- 為替・金利・原油・VIX・日経・TOPIX・S&P500・NASDAQ（マクロ系列）
+### ファンダメンタル
+PER / PBR / ROE / ROA / EPS / BPS / 営業利益率 / 自己資本比率  
+API: `POST /api/v1/fundamentals/ingest`, `GET /api/v1/fundamentals/{ticker}`
 
-## 推奨 API
+### AI予測（ML）
+上昇率・下落率・売買判断のアンサンブル  
+API: `POST /api/v1/ml/predict`
 
-| 用途 | プロバイダ | 備考 |
-|---|---|---|
-| 研究・プロトタイプ | Yahoo Finance | キー不要（`yfinance`） |
-| 汎用 | Alpha Vantage / Twelve Data / Finnhub | `.env` にキー設定 |
-| 米国株高品質 | Polygon.io | |
-| 国内機関 | JPX / QUICK / Bloomberg | `collectors/commercial.py` スタブ |
+### 深層学習
+LSTM / GRU / Transformer / TFT-lite（PyTorch）  
+API: `POST /api/v1/dl/predict`
+
+### ベクトルDB / RAG
+既定: **pgvector**（Pinecone / Weaviate / Milvus / Qdrant アダプタあり）  
+保存: 決算・IR・ニュース・チャット  
+API: `POST /api/v1/rag/ingest`, `POST /api/v1/rag/query`
+
+### 自動売買
+日本: SBI / 楽天 / auカブコム（契約後接続スタブ）  
+海外: Interactive Brokers / Alpaca  
+既定: `TRADING_MODE=paper` / `BROKER_NAME=paper`  
+API: `GET /api/v1/brokers`, `POST /api/v1/brokers/order`
+
+### バックテスト（必須）
+engines: `pandas` | `vectorbt` | `backtrader` | `zipline`(stub)  
+API: `POST /api/v1/backtest/run`
+
+### リスク管理（必須）
+損切り / 利確 / ポジションサイズ / 最大損失 / 最大保有数 / レバレッジ  
+API: `POST /api/v1/risk/position-size`, `POST /api/v1/risk/evaluate/{ticker}`
 
 ## クイックスタート
 
-### 1. 環境変数
-
 ```bash
 cp .env.example .env
-# 必要に応じて API キーを記入
-```
-
-### 2. Docker 起動
-
-```bash
 docker compose up --build
 ```
 
-| サービス | URL |
+| URL | 用途 |
 |---|---|
-| Frontend | http://localhost:3000 |
-| API / Docs | http://localhost:8000/docs |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
+| http://localhost:3000 | ダッシュボード（ECharts / Chart.js / TradingView） |
+| http://localhost:8000/docs | OpenAPI |
 
-### 3. パイプライン実行例
+> 既存の `postgres_data` ボリュームがある場合、pgvector イメージ切替のため  
+> `docker compose down -v` でボリューム再作成が必要なことがあります。
+
+### 例
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/pipeline/run \
+# データ取込
+curl -X POST http://localhost:8000/api/v1/ingest/bars \
+  -H "Content-Type: application/json" -d '{"ticker":"7203.T","limit":200}'
+
+# テクニカル
+curl http://localhost:8000/api/v1/technical/7203.T
+
+# バックテスト
+curl -X POST http://localhost:8000/api/v1/backtest/run \
   -H "Content-Type: application/json" \
-  -d '{"ticker":"7203.T","quantity":100}'
+  -d '{"ticker":"7203.T","engine":"pandas"}'
+
+# ML アンサンブル
+curl -X POST http://localhost:8000/api/v1/ml/predict \
+  -H "Content-Type: application/json" -d '{"ticker":"7203.T"}'
 ```
 
-ダッシュボードの「フルパイプライン実行」でも同様です。
+## 環境変数（抜粋）
 
-## ローカル開発（Docker なし）
+- `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` — LLM
+- `VECTOR_BACKEND=pgvector` — RAG バックエンド
+- `ALPACA_API_KEY` / `SBI_API_KEY` / … — 証券 API
+- `DEFAULT_STOP_LOSS_PCT` / `MAX_OPEN_POSITIONS` / `MAX_LEVERAGE` — リスク
 
-### Backend
-
-Python **3.11 または 3.12** を使用してください（3.14 は未対応）。
-
-```bash
-cd backend
-py -3.12 -m venv .venv
-# Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-# PostgreSQL / Redis を起動したうえで
-uvicorn app.main:app --reload --port 8000
-```
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-## 主要 API
-
-| Method | Path | 説明 |
-|---|---|---|
-| GET | `/api/v1/health` | ヘルス + プロバイダ状態 |
-| POST | `/api/v1/ingest/bars` | OHLCV 取込 |
-| POST | `/api/v1/ingest/macro` | マクロ指標取込 |
-| POST | `/api/v1/predict` | 予測 |
-| POST | `/api/v1/pipeline/run` | フルエージェント実行 |
-| GET | `/api/v1/orders` | 注文一覧 |
-| GET | `/api/v1/positions` | ポジション |
-| GET | `/api/v1/risk/events` | リスクイベント |
-| GET | `/api/v1/sns/posts` | SNS 下書き |
-
-## リスク・運用上の注意
-
-- 既定の `TRADING_MODE=paper` です。実発注はブローカー接続実装後にのみ有効化してください。
-- 日次損失上限・ポジション比率・注文金額上限は `.env` の `MAX_*` で制御します。
-- 本システムは研究・開発用途の骨格です。投資判断の最終責任は利用者にあります。
-
-## ディレクトリ構成
+## ディレクトリ
 
 ```
-StockPricePpredictionTool/
-├── docker-compose.yml
-├── backend/
-│   ├── app/
-│   │   ├── agents/pipeline.py      # 統合エージェント
-│   │   ├── collectors/             # マーケットデータ取得
-│   │   ├── services/               # 取込・予測・売買・SNS
-│   │   ├── workers/                # Celery 定期ジョブ
-│   │   └── api/routes.py
-│   └── db/init.sql
-└── frontend/                       # Next.js ダッシュボード
+backend/app/
+  analysis/     # technical, fundamental, news
+  llm/          # OpenAI / Claude / Gemini
+  ml/           # sklearn / xgb / lgbm / catboost
+  dl/           # LSTM GRU Transformer TFT
+  rag/          # pgvector RAG
+  brokers/      # SBI/楽天/カブコム/IBKR/Alpaca
+  backtest/     # vectorbt / backtrader / pandas
+  risk/         # 損切り・利確・サイジング
+frontend/
+  components/AnalysisCharts.tsx  # ECharts + Chart.js + TradingView
 ```
-"# StockPricePpredictionTool-" 
+
+## 注意
+
+- 実発注は `TRADING_MODE=live` かつブローカー接続実装後のみ。
+- 日経・Bloomberg の本番フィードはライセンスが必要（現状は公開 RSS / Google News proxy）。
+- GPT-5.5 など最新モデル名は `.env` の `OPENAI_MODEL` で指定可能です。

@@ -1,0 +1,4 @@
+# Optional deep learning (installed separately in Dockerfile to keep layers clear)
+# CPU PyTorch + TensorFlow
+torch==2.5.1
+tensorflow==2.18.0
