@@ -78,6 +78,7 @@ docker compose up --build
 - フロントは別サービスで `frontend/Dockerfile`、または Vercel 等へ
 - 必須環境変数: `DATABASE_URL`, `REDIS_URL`, `API_CORS_ORIGINS`
 - Healthcheck: `GET /api/v1/health`
+- `DATABASE_URL` は Railway の `postgres://...` / `postgresql://...` でも可（起動時に `postgresql+asyncpg://` へ自動変換）
 
 > 既存の `postgres_data` ボリュームがある場合、pgvector イメージ切替のため  
 > `docker compose down -v` でボリューム再作成が必要なことがあります。

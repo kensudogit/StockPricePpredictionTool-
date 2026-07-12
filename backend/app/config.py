@@ -1,6 +1,41 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def to_async_database_url(url: str) -> str:
+    """Normalize Railway/Heroku-style postgres URLs for SQLAlchemy async (asyncpg)."""
+    if not url:
+        return url
+    u = url.strip()
+    # Railway/Heroku often provide postgres://
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u[len("postgres://") :]
+    replacements = (
+        ("postgresql+psycopg2://", "postgresql+asyncpg://"),
+        ("postgresql+psycopg://", "postgresql+asyncpg://"),
+        ("postgresql://", "postgresql+asyncpg://"),
+    )
+    for old, new in replacements:
+        if u.startswith(old):
+            u = new + u[len(old) :]
+            break
+    return u
+
+
+def to_sync_database_url(url: str) -> str:
+    """Normalize to sync psycopg2 URL for Celery / Alembic if needed."""
+    if not url:
+        return url
+    u = url.strip()
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u[len("postgres://") :]
+    if u.startswith("postgresql+asyncpg://"):
+        u = "postgresql://" + u[len("postgresql+asyncpg://") :]
+    elif u.startswith("postgresql+psycopg2://"):
+        u = "postgresql://" + u[len("postgresql+psycopg2://") :]
+    return u
 
 
 class Settings(BaseSettings):
@@ -66,9 +101,27 @@ class Settings(BaseSettings):
     twitter_access_secret: str = ""
     x_bearer_token: str = ""
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_async_db_url(cls, v: object) -> object:
+        if isinstance(v, str):
+            return to_async_database_url(v)
+        return v
+
+    @field_validator("database_url_sync", mode="before")
+    @classmethod
+    def normalize_sync_db_url(cls, v: object) -> object:
+        if isinstance(v, str):
+            return to_sync_database_url(v)
+        return v
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.api_cors_origins.split(",") if o.strip()]
+
+    @property
+    def async_database_url(self) -> str:
+        return to_async_database_url(self.database_url)
 
 
 @lru_cache
