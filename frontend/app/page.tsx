@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AnalysisCharts } from "@/components/AnalysisCharts";
+import { UsageGuidePanel } from "@/components/UsageGuidePanel";
 import {
   api,
   type BacktestResult,
@@ -59,6 +60,7 @@ export default function DashboardPage() {
   const [pipeline, setPipeline] = useState<PipelineResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ragAnswer, setRagAnswer] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(true);
 
   const refresh = useCallback(async (selected = ticker) => {
     setError(null);
@@ -142,6 +144,14 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className={styles.status}>
+          <button
+            type="button"
+            className={styles.pill}
+            onClick={() => setGuideOpen((v) => !v)}
+            aria-pressed={guideOpen}
+          >
+            利用手順
+          </button>
           <a className={styles.pill} href="/tests/">
             テスト結果
           </a>
@@ -152,6 +162,8 @@ export default function DashboardPage() {
           <div className={styles.pill}>mode: {health?.trading_mode ?? "—"}</div>
         </div>
       </header>
+
+      <UsageGuidePanel open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <section className={styles.controls}>
         <label className={styles.field}>
