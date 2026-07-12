@@ -70,6 +70,15 @@ docker compose up --build
 | http://localhost:3000 | ダッシュボード（ECharts / Chart.js / TradingView） |
 | http://localhost:8000/docs | OpenAPI |
 
+### クラウドデプロイ（Railway 等）
+
+ルートの `Dockerfile` が API をビルドします（ログの `couldn't locate the dockerfile at path Dockerfile` 対策）。
+
+- ビルド対象: `backend/`（`railway.toml` でルート Dockerfile を指定）
+- フロントは別サービスで `frontend/Dockerfile`、または Vercel 等へ
+- 必須環境変数: `DATABASE_URL`, `REDIS_URL`, `API_CORS_ORIGINS`
+- Healthcheck: `GET /api/v1/health`
+
 > 既存の `postgres_data` ボリュームがある場合、pgvector イメージ切替のため  
 > `docker compose down -v` でボリューム再作成が必要なことがあります。
 
