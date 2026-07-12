@@ -121,6 +121,9 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className={styles.status}>
+          <a className={styles.pill} href="/tests/">
+            テスト結果
+          </a>
           <div className={styles.pill}>
             <span className={health?.status === "ok" ? styles.dotOk : styles.dotBad} />
             API {health?.status ?? "…"}
@@ -188,9 +191,7 @@ export default function DashboardPage() {
           disabled={busy}
           onClick={() =>
             run("RAG", async () => {
-              const res = (await api.ragQuery(`${ticker} の直近ニュースと注目点は？`)) as {
-                answer?: string;
-              };
+              const res = await api.ragQuery(`${ticker} の直近ニュースと注目点は？`);
               setRagAnswer(res.answer || "");
             })
           }

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv312/
 venv/
 .env
 .mypy_cache/
@@ -16,7 +17,6 @@ node_modules/
 out/
 dist/
 *.tsbuildinfo
-next-env.d.ts
 
 # IDE / OS
 .idea/
@@ -25,13 +25,16 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 
-# Data / models
+# Data / models / reports
 data/raw/
 data/processed/
 models/artifacts/
 *.pkl
 *.joblib
 *.h5
+test-results/
+backend/.pytest_cache/
+frontend/coverage/
 
 # Docker volumes
 postgres-data/

@@ -18,4 +18,5 @@ models/artifacts
 **/*.pkl
 **/*.joblib
 README.md
-scripts
+# keep scripts for tests; ignore generated reports in git
+test-results/

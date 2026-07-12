@@ -1,4 +1,5 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Same-origin on Railway: leave empty. Local docker/dev: http://localhost:8000
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api/v1${path}`, {
@@ -188,9 +189,12 @@ export const api = {
     request("/news/collect", { method: "POST", body: JSON.stringify({ ticker }) }),
   news: () => request<NewsItem[]>("/news"),
   mlPredict: (ticker: string) =>
-    request("/ml/predict", { method: "POST", body: JSON.stringify({ ticker }) }),
+    request<Record<string, unknown>>("/ml/predict", { method: "POST", body: JSON.stringify({ ticker }) }),
   dlPredict: (ticker: string, model = "lstm") =>
-    request("/dl/predict", { method: "POST", body: JSON.stringify({ ticker, model, backend: "pytorch", epochs: 8 }) }),
+    request<Record<string, unknown>>("/dl/predict", {
+      method: "POST",
+      body: JSON.stringify({ ticker, model, backend: "pytorch", epochs: 8 }),
+    }),
   backtest: (ticker: string, engine = "pandas") =>
     request<BacktestResult>("/backtest/run", {
       method: "POST",
@@ -198,7 +202,7 @@ export const api = {
     }),
   brokers: () => request<{ name: string; available: boolean }[]>("/brokers"),
   ragQuery: (question: string) =>
-    request("/rag/query", {
+    request<{ answer?: string; context?: string; hits?: unknown[] }>("/rag/query", {
       method: "POST",
       body: JSON.stringify({ question, limit: 5, session_id: "web" }),
     }),

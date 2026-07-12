@@ -6,7 +6,10 @@
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "vitest run --reporter=default --reporter=json --outputFile.json=../test-results/frontend-vitest.json"
   },
   "dependencies": {
     "chart.js": "4.4.7",
@@ -22,6 +25,8 @@
     "@types/node": "22.10.2",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
-    "typescript": "5.7.2"
+    "jsdom": "25.0.1",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
   }
 }

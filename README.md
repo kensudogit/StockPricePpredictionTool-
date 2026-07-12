@@ -72,13 +72,15 @@ docker compose up --build
 
 ### クラウドデプロイ（Railway 等）
 
-ルートの `Dockerfile` が API をビルドします（ログの `couldn't locate the dockerfile at path Dockerfile` 対策）。
+ルートの `Dockerfile` が **フロント（Next.js 静的書き出し）+ API** を1サービスでビルドします。
 
-- ビルド対象: `backend/`（`railway.toml` でルート Dockerfile を指定）
-- フロントは別サービスで `frontend/Dockerfile`、または Vercel 等へ
-- 必須環境変数: `DATABASE_URL`, `REDIS_URL`, `API_CORS_ORIGINS`
+- `/` → StockAI ダッシュボード
+- `/api/v1/*` → API
+- `/docs` → OpenAPI
+- ビルド時 `NEXT_PUBLIC_API_URL` は空（同一オリジンで `/api/v1` を呼ぶ）
+- 必須環境変数: `DATABASE_URL`, `REDIS_URL`（任意）
+- `DATABASE_URL` は Railway の `postgres://...` でも可（`postgresql+asyncpg://` へ自動変換）
 - Healthcheck: `GET /api/v1/health`
-- `DATABASE_URL` は Railway の `postgres://...` / `postgresql://...` でも可（起動時に `postgresql+asyncpg://` へ自動変換）
 
 > 既存の `postgres_data` ボリュームがある場合、pgvector イメージ切替のため  
 > `docker compose down -v` でボリューム再作成が必要なことがあります。
@@ -126,7 +128,23 @@ frontend/
   components/AnalysisCharts.tsx  # ECharts + Chart.js + TradingView
 ```
 
-## 注意
+## テスト
+
+```bash
+# 依存関係
+cd backend && pip install -r requirements.txt -r requirements-dev.txt
+cd ../frontend && npm install
+
+# 全テスト実行 → test-results/ に HTML/JSON 出力
+python scripts/run_tests.py
+```
+
+Web で確認:
+- ダッシュボードの「テスト結果」または `/tests/`
+- `/api/v1/tests/summary`（JSON）
+- `/api/v1/tests/report`（HTML）
+- `/test-results/`（静的レポート）
+- `POST /api/v1/tests/run?wait=true` で再実行
 
 - 実発注は `TRADING_MODE=live` かつブローカー接続実装後のみ。
 - 日経・Bloomberg の本番フィードはライセンスが必要（現状は公開 RSS / Google News proxy）。
