@@ -22,9 +22,22 @@ from app.ml.ensemble import MLEnsembleService
 from app.models import ChatMessage, NewsArticle, TechnicalSnapshot
 from app.rag.store import RAGService
 from app.risk.manager import EnhancedRiskManager
+from app.services.ingestion import DataIngestionService
 from app.services.market_data import get_symbol_id, load_bars_df
 
 router = APIRouter(tags=["analysis"])
+
+
+async def _ensure_bars(db: AsyncSession, ticker: str, min_rows: int = 40, limit: int = 200):
+    """Auto-ingest OHLCV when DB has insufficient history."""
+    df = await load_bars_df(db, ticker, limit=max(limit, min_rows))
+    if len(df) >= min_rows:
+        return df
+    try:
+        await DataIngestionService(db).ingest_bars(ticker, timeframe="1d", limit=limit)
+    except Exception:
+        pass
+    return await load_bars_df(db, ticker, limit=max(limit, min_rows))
 
 
 class TickerBody(BaseModel):
@@ -87,11 +100,14 @@ class RiskSizeBody(BaseModel):
 
 @router.get("/technical/{ticker}")
 async def technical_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
-    df = await load_bars_df(db, ticker)
+    df = await _ensure_bars(db, ticker, min_rows=30)
     if df.empty:
-        raise HTTPException(400, "No bars. Ingest data first.")
-    snap = latest_snapshot(df)
-    series = series_for_chart(df)
+        return {"ticker": ticker, "snapshot": {}, "series": [], "warning": "No bars available. Try データ取込."}
+    try:
+        snap = latest_snapshot(df)
+        series = series_for_chart(df)
+    except Exception as e:
+        raise HTTPException(400, f"Technical compute failed: {e}") from e
     symbol_id = await get_symbol_id(db, ticker)
     if symbol_id:
         db.add(TechnicalSnapshot(symbol_id=symbol_id, indicators=snap))
@@ -101,14 +117,37 @@ async def technical_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/fundamentals/ingest")
 async def fundamentals_ingest(body: TickerBody, db: AsyncSession = Depends(get_db)):
-    return await FundamentalService(db).ingest(body.ticker)
+    try:
+        return await FundamentalService(db).ingest(body.ticker)
+    except Exception as e:
+        raise HTTPException(500, f"Fundamentals ingest failed: {e}") from e
 
 
 @router.get("/fundamentals/{ticker}")
 async def fundamentals_get(ticker: str, db: AsyncSession = Depends(get_db)):
     data = await FundamentalService(db).latest(ticker)
     if not data:
-        raise HTTPException(404, "No fundamentals. Call POST /fundamentals/ingest first.")
+        # auto-ingest once then re-read
+        try:
+            await FundamentalService(db).ingest(ticker)
+            data = await FundamentalService(db).latest(ticker)
+        except Exception:
+            data = None
+    if not data:
+        return {
+            "ticker": ticker,
+            "per": None,
+            "pbr": None,
+            "roe": None,
+            "roa": None,
+            "eps": None,
+            "bps": None,
+            "operating_margin": None,
+            "equity_ratio": None,
+            "market_cap": None,
+            "source": "none",
+            "meta": {"note": "unavailable"},
+        }
     return data
 
 
@@ -180,17 +219,17 @@ async def news_enrich(article_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/ml/predict")
 async def ml_predict(body: MLPredictBody, db: AsyncSession = Depends(get_db)):
-    df = await load_bars_df(db, body.ticker)
-    if df.empty:
-        raise HTTPException(400, "No bars. Ingest data first.")
+    df = await _ensure_bars(db, body.ticker, min_rows=60)
+    if len(df) < 40:
+        raise HTTPException(400, "Insufficient bars after ingest. Check Yahoo Finance availability.")
     return {"ticker": body.ticker, **MLEnsembleService().predict(df, models=body.models)}
 
 
 @router.post("/dl/predict")
 async def dl_predict(body: DLPredictBody, db: AsyncSession = Depends(get_db)):
-    df = await load_bars_df(db, body.ticker)
-    if df.empty:
-        raise HTTPException(400, "No bars. Ingest data first.")
+    df = await _ensure_bars(db, body.ticker, min_rows=60)
+    if len(df) < 40:
+        raise HTTPException(400, "Insufficient bars after ingest. Check Yahoo Finance availability.")
     result = DeepLearningService().predict(
         df, model=body.model, backend=body.backend, epochs=body.epochs
     )
@@ -199,11 +238,14 @@ async def dl_predict(body: DLPredictBody, db: AsyncSession = Depends(get_db)):
 
 @router.post("/backtest/run")
 async def backtest_run(body: BacktestBody, db: AsyncSession = Depends(get_db)):
-    df = await load_bars_df(db, body.ticker, limit=500)
+    df = await _ensure_bars(db, body.ticker, min_rows=80, limit=500)
     if len(df) < 50:
-        raise HTTPException(400, "Need at least 50 bars for backtest.")
+        raise HTTPException(400, "Need at least 50 bars for backtest. Ingest may have failed.")
     svc = BacktestService(db)
-    return await svc.run_and_store(body.ticker, df, engine=body.engine, fast=body.fast, slow=body.slow)
+    # Prefer pandas engine when vectorbt unavailable
+    engine = body.engine
+    result = await svc.run_and_store(body.ticker, df, engine=engine, fast=body.fast, slow=body.slow)
+    return result
 
 
 @router.post("/rag/ingest")
@@ -220,7 +262,10 @@ async def rag_ingest(body: RagIngestBody, db: AsyncSession = Depends(get_db)):
 
 @router.post("/rag/query")
 async def rag_query(body: RagQueryBody, db: AsyncSession = Depends(get_db)):
-    result = await RAGService(db).query(body.question, limit=body.limit)
+    try:
+        result = await RAGService(db).query(body.question, limit=body.limit)
+    except Exception as e:
+        result = {"hits": [], "context": "", "warning": f"RAG store error: {e}"}
     if body.session_id:
         db.add(ChatMessage(session_id=body.session_id, role="user", content=body.question))
         db.add(
@@ -233,8 +278,8 @@ async def rag_query(body: RagQueryBody, db: AsyncSession = Depends(get_db)):
         await db.commit()
     llm = NewsLLMService()
     answer = await llm.llm.complete(
-        "以下のコンテキストのみを根拠に簡潔に日本語で回答してください。",
-        f"Q: {body.question}\n\nContext:\n{result.get('context')}",
+        "以下のコンテキストのみを根拠に簡潔に日本語で回答してください。コンテキストが空なら一般知識で短く答えてください。",
+        f"Q: {body.question}\n\nContext:\n{result.get('context') or '(empty)'}",
     )
     result["answer"] = answer
     return result

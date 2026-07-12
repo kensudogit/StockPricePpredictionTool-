@@ -23,8 +23,17 @@ import styles from "./page.module.css";
 const DEFAULT_TICKER = "7203.T";
 
 function tvSymbolFor(ticker: string) {
-  if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
-  if (ticker.startsWith("^")) return ticker;
+  // TradingView free widget prefers TYO for Tokyo equities
+  if (ticker.endsWith(".T")) return `TYO:${ticker.replace(".T", "")}`;
+  if (ticker.startsWith("^")) {
+    const map: Record<string, string> = {
+      "^N225": "INDEX:NKY",
+      "^GSPC": "SPX",
+      "^IXIC": "NDX",
+      "^VIX": "VIX",
+    };
+    return map[ticker] || ticker.replace("^", "");
+  }
   return ticker;
 }
 

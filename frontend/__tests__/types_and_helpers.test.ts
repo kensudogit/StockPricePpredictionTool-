@@ -27,13 +27,13 @@ describe("TechnicalResponse shape", () => {
 
 describe("tv symbol helper logic", () => {
   function tvSymbolFor(ticker: string) {
-    if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
+    if (ticker.endsWith(".T")) return `TYO:${ticker.replace(".T", "")}`;
     if (ticker.startsWith("^")) return ticker;
     return ticker;
   }
 
-  it("maps JP ticker to TSE", () => {
-    expect(tvSymbolFor("7203.T")).toBe("TSE:7203");
+  it("maps JP ticker to TYO", () => {
+    expect(tvSymbolFor("7203.T")).toBe("TYO:7203");
   });
 
   it("keeps index symbols", () => {

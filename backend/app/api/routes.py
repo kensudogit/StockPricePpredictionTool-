@@ -72,8 +72,14 @@ async def list_symbols(db: AsyncSession = Depends(get_db)):
 
 @router.post("/ingest/bars")
 async def ingest_bars(body: IngestRequest, db: AsyncSession = Depends(get_db)):
-    svc = DataIngestionService(db)
-    return await svc.ingest_bars(body.ticker, timeframe=body.timeframe, limit=body.limit)
+    try:
+        svc = DataIngestionService(db)
+        result = await svc.ingest_bars(body.ticker, timeframe=body.timeframe, limit=body.limit)
+        if result.get("bars", 0) == 0:
+            return {**result, "warning": "0 bars ingested — Yahoo may be blocked or ticker invalid"}
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Ingest failed: {e}") from e
 
 
 @router.post("/ingest/macro")

@@ -69,7 +69,7 @@ class Settings(BaseSettings):
 
     # LLM
     openai_api_key: str = ""
-    openai_model: str = "gpt-5.5"
+    openai_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     google_api_key: str = ""

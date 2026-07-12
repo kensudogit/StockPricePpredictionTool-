@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Fundamental, Symbol
 from app.services.ingestion import DataIngestionService
+
+logger = logging.getLogger("stockai.fundamental")
 
 
 def _safe_float(v: Any) -> float | None:
@@ -26,10 +29,50 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
+def _empty_fundamentals(ticker: str, note: str) -> dict[str, Any]:
+    return {
+        "per": None,
+        "pbr": None,
+        "roe": None,
+        "roa": None,
+        "eps": None,
+        "bps": None,
+        "operating_margin": None,
+        "equity_ratio": None,
+        "market_cap": None,
+        "source": "yahoo",
+        "meta": {"ticker": ticker, "note": note},
+    }
+
+
 def fetch_fundamentals_yahoo(ticker: str) -> dict[str, Any]:
-    t = yf.Ticker(ticker)
-    info = t.info or {}
-    # Prefer info fields; fall back to financials-derived where possible
+    """Best-effort Yahoo fundamentals. Never raises — returns nulls on failure."""
+    info: dict[str, Any] = {}
+    try:
+        t = yf.Ticker(ticker)
+        try:
+            info = dict(t.info or {})
+        except Exception as e:  # noqa: BLE001 — Yahoo often returns empty HTML / JSON errors
+            logger.warning("ticker.info failed for %s: %s", ticker, e)
+            info = {}
+        if not info:
+            try:
+                fi = getattr(t, "fast_info", None)
+                if fi:
+                    info = {
+                        "marketCap": getattr(fi, "market_cap", None),
+                        "currency": getattr(fi, "currency", None),
+                        "previousClose": getattr(fi, "previous_close", None),
+                    }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("fast_info failed for %s: %s", ticker, e)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("yfinance Ticker failed for %s: %s", ticker, e)
+        return _empty_fundamentals(ticker, str(e))
+
+    if not info:
+        return _empty_fundamentals(ticker, "yahoo returned empty info")
+
     per = _safe_float(info.get("trailingPE") or info.get("forwardPE"))
     pbr = _safe_float(info.get("priceToBook"))
     roe = _safe_float(info.get("returnOnEquity"))
@@ -37,11 +80,10 @@ def fetch_fundamentals_yahoo(ticker: str) -> dict[str, Any]:
     eps = _safe_float(info.get("trailingEps") or info.get("forwardEps"))
     book = _safe_float(info.get("bookValue"))
     op_margin = _safe_float(info.get("operatingMargins"))
-    # equity ratio ≈ 1 / (totalDebt/equity + 1) when available
     de = _safe_float(info.get("debtToEquity"))
     equity_ratio = None
-    if de is not None:
-        equity_ratio = 1.0 / (1.0 + de / 100.0) if de >= 0 else None
+    if de is not None and de >= 0:
+        equity_ratio = 1.0 / (1.0 + de / 100.0)
     return {
         "per": per,
         "pbr": pbr,
@@ -57,6 +99,7 @@ def fetch_fundamentals_yahoo(ticker: str) -> dict[str, Any]:
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "currency": info.get("currency"),
+            "name": info.get("shortName") or info.get("longName"),
         },
     }
 
@@ -67,8 +110,11 @@ class FundamentalService:
         self.ingestion = DataIngestionService(db)
 
     async def ingest(self, ticker: str) -> dict:
-        data = fetch_fundamentals_yahoo(ticker)
-        symbol = await self.ingestion.ensure_symbol(ticker, name=data.get("meta", {}).get("industry"))
+        import asyncio
+
+        data = await asyncio.to_thread(fetch_fundamentals_yahoo, ticker)
+        name = (data.get("meta") or {}).get("name") or (data.get("meta") or {}).get("industry")
+        symbol = await self.ingestion.ensure_symbol(ticker, name=name)
         rec = Fundamental(
             symbol_id=symbol.id,
             as_of_date=date.today(),
@@ -84,7 +130,6 @@ class FundamentalService:
             source=data["source"],
             meta=data.get("meta") or {},
         )
-        # upsert-ish: delete same day then insert
         existing = (
             await self.db.execute(
                 select(Fundamental).where(

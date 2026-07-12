@@ -24,7 +24,7 @@ type Props = {
   tvSymbol?: string;
 };
 
-export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TSE:7203" }: Props) {
+export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:7203" }: Props) {
   const series = technical?.series ?? [];
   const chartRef = useRef<HTMLDivElement>(null);
 

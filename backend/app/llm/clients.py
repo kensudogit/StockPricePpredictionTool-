@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 import httpx
 
 from app.config import get_settings
 
+logger = logging.getLogger("stockai.llm")
+
 Provider = Literal["openai", "claude", "gemini", "heuristic"]
+
+OPENAI_FALLBACKS = ("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo")
 
 
 class LLMClient:
@@ -26,30 +31,48 @@ class LLMClient:
         return "heuristic"
 
     async def complete(self, system: str, user: str, model: str | None = None) -> str:
-        if self.provider == "openai":
-            return await self._openai(system, user, model or self.settings.openai_model)
-        if self.provider == "claude":
-            return await self._claude(system, user, model or self.settings.anthropic_model)
-        if self.provider == "gemini":
-            return await self._gemini(system, user, model or self.settings.google_model)
+        try:
+            if self.provider == "openai":
+                return await self._openai(system, user, model or self.settings.openai_model)
+            if self.provider == "claude":
+                return await self._claude(system, user, model or self.settings.anthropic_model)
+            if self.provider == "gemini":
+                return await self._gemini(system, user, model or self.settings.google_model)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("LLM %s failed, falling back to heuristic: %s", self.provider, e)
         return self._heuristic(user)
 
     async def _openai(self, system: str, user: str, model: str) -> str:
+        candidates = [model, *[m for m in OPENAI_FALLBACKS if m != model]]
+        last_err: Exception | None = None
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.2,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            for m in candidates:
+                try:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
+                        json={
+                            "model": m,
+                            "messages": [
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": user},
+                            ],
+                            "temperature": 0.2,
+                        },
+                    )
+                    if resp.status_code >= 400:
+                        last_err = httpx.HTTPStatusError(
+                            f"{resp.status_code} {resp.text[:200]}",
+                            request=resp.request,
+                            response=resp,
+                        )
+                        logger.warning("OpenAI model %s failed: %s", m, resp.text[:200])
+                        continue
+                    return resp.json()["choices"][0]["message"]["content"]
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    continue
+        raise last_err or RuntimeError("OpenAI request failed")
 
     async def _claude(self, system: str, user: str, model: str) -> str:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -132,19 +155,19 @@ class NewsLLMService:
     async def sentiment(self, text: str) -> dict[str, Any]:
         if self.llm.provider == "heuristic":
             return heuristic_sentiment(text)
-        raw = await self.llm.complete(
-            '金融テキストのセンチメントを JSON のみで返してください。形式: {"score": -1.0〜1.0, "label": "positive|neutral|negative"}',
-            text[:4000],
-        )
-        import json
-        import re
-
-        m = re.search(r"\{.*\}", raw, re.S)
-        if not m:
-            return heuristic_sentiment(text)
         try:
+            raw = await self.llm.complete(
+                '金融テキストのセンチメントを JSON のみで返してください。形式: {"score": -1.0〜1.0, "label": "positive|neutral|negative"}',
+                text[:4000],
+            )
+            import json
+            import re
+
+            m = re.search(r"\{.*\}", raw, re.S)
+            if not m:
+                return heuristic_sentiment(text)
             data = json.loads(m.group())
             data["provider"] = self.llm.provider
             return data
-        except json.JSONDecodeError:
+        except Exception:  # noqa: BLE001
             return heuristic_sentiment(text)
