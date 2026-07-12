@@ -23,14 +23,14 @@ import styles from "./page.module.css";
 const DEFAULT_TICKER = "7203.T";
 
 function tvSymbolFor(ticker: string) {
-  // TradingView free widget prefers TYO for Tokyo equities
-  if (ticker.endsWith(".T")) return `TYO:${ticker.replace(".T", "")}`;
+  // TradingView embed: TSE: works for Tokyo listed equities
+  if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
   if (ticker.startsWith("^")) {
     const map: Record<string, string> = {
-      "^N225": "INDEX:NKY",
-      "^GSPC": "SPX",
-      "^IXIC": "NDX",
-      "^VIX": "VIX",
+      "^N225": "TVC:NI225",
+      "^GSPC": "SP:SPX",
+      "^IXIC": "NASDAQ:IXIC",
+      "^VIX": "TVC:VIX",
     };
     return map[ticker] || ticker.replace("^", "");
   }
@@ -117,8 +117,12 @@ export default function DashboardPage() {
     setMessage(null);
     setError(null);
     try {
-      await fn();
-      setMessage(label);
+      const result = await fn();
+      if (typeof result === "string" && result) {
+        setMessage(result);
+      } else {
+        setMessage(label);
+      }
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : label + " 失敗");
@@ -161,7 +165,20 @@ export default function DashboardPage() {
           </select>
         </label>
         <button className={styles.btnGhost} disabled={busy} onClick={() => refresh()}>更新</button>
-        <button className={styles.btnGhost} disabled={busy} onClick={() => run("データ取込完了", () => api.ingest(ticker))}>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("データ取込", async () => {
+              const res = (await api.ingest(ticker)) as { bars?: number; source?: string };
+              const n = res.bars ?? 0;
+              if (n <= 0) {
+                throw new Error("価格データが0件です（外部配信が遮断されている可能性があります）");
+              }
+              return `データ取込完了: ${n}本 (${res.source ?? "—"})`;
+            })
+          }
+        >
           データ取込
         </button>
         <button className={styles.btnGhost} disabled={busy} onClick={() => run("ファンダ取込", () => api.fundamentalsIngest(ticker))}>
@@ -242,11 +259,11 @@ export default function DashboardPage() {
           <ul className={styles.list}>
             {technical ? (
               <>
-                <li><span>Trend</span><strong>{String(technical.snapshot.trend)}</strong></li>
-                <li><span>RSI</span><strong className={styles.mono}>{Number(technical.snapshot.rsi_14).toFixed(1)}</strong></li>
-                <li><span>MACD</span><strong className={styles.mono}>{Number(technical.snapshot.macd).toFixed(2)}</strong></li>
-                <li><span>ADX</span><strong className={styles.mono}>{Number(technical.snapshot.adx).toFixed(1)}</strong></li>
-                <li><span>ATR</span><strong className={styles.mono}>{Number(technical.snapshot.atr_14).toFixed(2)}</strong></li>
+                <li><span>Trend</span><strong>{String(technical.snapshot.trend ?? "—")}</strong></li>
+                <li><span>RSI</span><strong className={styles.mono}>{technical.snapshot.rsi_14 != null ? Number(technical.snapshot.rsi_14).toFixed(1) : "—"}</strong></li>
+                <li><span>MACD</span><strong className={styles.mono}>{technical.snapshot.macd != null ? Number(technical.snapshot.macd).toFixed(2) : "—"}</strong></li>
+                <li><span>ADX</span><strong className={styles.mono}>{technical.snapshot.adx != null ? Number(technical.snapshot.adx).toFixed(1) : "—"}</strong></li>
+                <li><span>ATR</span><strong className={styles.mono}>{technical.snapshot.atr_14 != null ? Number(technical.snapshot.atr_14).toFixed(2) : "—"}</strong></li>
               </>
             ) : (
               <li className={styles.empty}>データ取込後に表示</li>

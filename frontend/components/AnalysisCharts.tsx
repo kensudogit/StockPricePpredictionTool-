@@ -142,36 +142,34 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
   );
 
   useEffect(() => {
-    // TradingView advanced chart widget
+    // iframe embed is more reliable than tv.js for JP symbols on Railway
     const el = chartRef.current;
     if (!el) return;
     el.innerHTML = "";
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-    script.onload = () => {
-      // @ts-expect-error TradingView global
-      if (window.TradingView) {
-        // @ts-expect-error TradingView global
-        new window.TradingView.widget({
-          container_id: el.id,
-          symbol: tvSymbol,
-          interval: "D",
-          timezone: "Asia/Tokyo",
-          theme: "dark",
-          style: "1",
-          locale: "ja",
-          width: "100%",
-          height: 420,
-          hide_side_toolbar: false,
-          allow_symbol_change: true,
-        });
-      }
-    };
-    document.body.appendChild(script);
-    return () => {
-      script.remove();
-    };
+    const iframe = document.createElement("iframe");
+    const params = new URLSearchParams({
+      frameElementId: "tv_chart",
+      symbol: tvSymbol,
+      interval: "D",
+      hidesidetoolbar: "0",
+      symboledit: "1",
+      saveimage: "0",
+      toolbarbg: "1a2420",
+      studies: "[]",
+      theme: "dark",
+      style: "1",
+      timezone: "Asia/Tokyo",
+      withdateranges: "1",
+      hideideas: "1",
+      locale: "ja",
+    });
+    iframe.src = `https://s.tradingview.com/widgetembed/?${params.toString()}`;
+    iframe.title = `TradingView ${tvSymbol}`;
+    iframe.style.width = "100%";
+    iframe.style.height = "420px";
+    iframe.style.border = "0";
+    iframe.allowFullscreen = true;
+    el.appendChild(iframe);
   }, [tvSymbol]);
 
   return (
@@ -181,7 +179,7 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
         {series.length ? (
           <ReactECharts option={echartsOption} style={{ height: 360 }} />
         ) : (
-          <p className={styles.empty}>テクニカルデータなし</p>
+          <p className={styles.empty}>テクニカルデータなし（「データ取込」で取得）</p>
         )}
       </section>
 
@@ -200,12 +198,12 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
             }}
           />
         ) : (
-          <p className={styles.empty}>テクニカルデータなし</p>
+          <p className={styles.empty}>テクニカルデータなし（「データ取込」で取得）</p>
         )}
       </section>
 
       <section className={styles.panelWide}>
-        <h3>TradingView Widget</h3>
+        <h3>TradingView Widget ({tvSymbol})</h3>
         <div id="tv_chart_container" ref={chartRef} className={styles.tv} />
       </section>
 

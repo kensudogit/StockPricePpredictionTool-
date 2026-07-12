@@ -27,17 +27,23 @@ class DataIngestionService:
         return symbol
 
     async def ingest_bars(self, ticker: str, timeframe: str = "1d", limit: int = 100) -> dict:
-        provider = get_primary_provider()
-        bars = await provider.fetch_bars(ticker, timeframe=timeframe, limit=limit)
-        if not bars:
-            # fallback chain
-            for p in get_providers():
-                if p.name == provider.name:
-                    continue
+        providers = get_providers()
+        bars = []
+        provider = providers[0]
+        ordered = sorted(
+            providers,
+            key=lambda p: (
+                0 if p.name == "yahoo" else 1 if (ticker.endswith(".T") and p.name == "stooq") else 2
+            ),
+        )
+        for p in ordered:
+            try:
                 bars = await p.fetch_bars(ticker, timeframe=timeframe, limit=limit)
-                if bars:
-                    provider = p
-                    break
+            except Exception:
+                bars = []
+            if bars:
+                provider = p
+                break
         symbol = await self.ensure_symbol(ticker)
         upserted = 0
         for bar in bars:

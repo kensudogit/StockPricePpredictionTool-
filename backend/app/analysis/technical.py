@@ -124,7 +124,12 @@ def compute_all(df: pd.DataFrame) -> pd.DataFrame:
 
 def latest_snapshot(df: pd.DataFrame) -> dict:
     tech = compute_all(df)
-    row = tech.dropna(subset=["sma_20", "rsi_14"]).iloc[-1]
+    ready = tech.dropna(subset=["close", "sma_20"])
+    if ready.empty:
+        ready = tech.dropna(subset=["close"])
+    if ready.empty:
+        return {"trend": "unknown", "close": None}
+    row = ready.iloc[-1]
     keys = [
         "sma_5", "sma_20", "sma_50", "sma_200", "ema_12", "ema_26",
         "macd", "macd_signal", "macd_hist", "adx", "plus_di", "minus_di",
@@ -132,7 +137,7 @@ def latest_snapshot(df: pd.DataFrame) -> dict:
         "bb_mid", "bb_upper", "bb_lower", "bb_width", "vwap", "obv",
     ]
     snap = {k: (None if pd.isna(row.get(k)) else float(row[k])) for k in keys}
-    snap["trend"] = str(row["trend"])
+    snap["trend"] = str(row.get("trend", "unknown"))
     snap["close"] = float(row["close"])
     return snap
 

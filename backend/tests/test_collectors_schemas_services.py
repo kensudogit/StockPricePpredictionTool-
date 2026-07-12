@@ -24,6 +24,8 @@ class TestCollectorsRegistry(unittest.TestCase):
         providers = get_providers()
         names = [p.name for p in providers]
         self.assertIn("yahoo", names)
+        self.assertIn("stooq", names)
+        self.assertEqual(names[0], "yahoo")
 
     def test_primary_provider(self):
         p = get_primary_provider()

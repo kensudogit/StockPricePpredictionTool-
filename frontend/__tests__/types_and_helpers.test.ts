@@ -27,16 +27,24 @@ describe("TechnicalResponse shape", () => {
 
 describe("tv symbol helper logic", () => {
   function tvSymbolFor(ticker: string) {
-    if (ticker.endsWith(".T")) return `TYO:${ticker.replace(".T", "")}`;
-    if (ticker.startsWith("^")) return ticker;
+    if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
+    if (ticker.startsWith("^")) {
+      const map: Record<string, string> = {
+        "^N225": "TVC:NI225",
+        "^GSPC": "SP:SPX",
+        "^IXIC": "NASDAQ:IXIC",
+        "^VIX": "TVC:VIX",
+      };
+      return map[ticker] || ticker.replace("^", "");
+    }
     return ticker;
   }
 
-  it("maps JP ticker to TYO", () => {
-    expect(tvSymbolFor("7203.T")).toBe("TYO:7203");
+  it("maps JP ticker to TSE", () => {
+    expect(tvSymbolFor("7203.T")).toBe("TSE:7203");
   });
 
-  it("keeps index symbols", () => {
-    expect(tvSymbolFor("^N225")).toBe("^N225");
+  it("maps Nikkei index", () => {
+    expect(tvSymbolFor("^N225")).toBe("TVC:NI225");
   });
 });
