@@ -33,11 +33,13 @@
   width: 100%;
 }
 
-.empty {
+.meta {
+  font-weight: 400;
   color: var(--muted);
-  font-size: 0.85rem;
-  padding: 2rem 0;
+  font-size: 0.8rem;
+  font-family: var(--mono);
 }
+
 
 @media (max-width: 960px) {
   .panel,

@@ -28,25 +28,45 @@ def run_pandas_backtest(df: pd.DataFrame, fast: int = 10, slow: int = 30, fee_bp
     rets = close.pct_change().fillna(0)
     strat_rets = position * rets - (position.diff().abs().fillna(0) * fee_bps / 10000.0)
     equity = (1 + strat_rets).cumprod()
+    buy_hold = (1 + rets).cumprod()
+    drawdown = equity / equity.cummax() - 1
     total_return = float(equity.iloc[-1] - 1)
     sharpe = float(strat_rets.mean() / (strat_rets.std() + 1e-12) * np.sqrt(252))
-    max_dd = float((equity / equity.cummax() - 1).min())
+    max_dd = float(drawdown.min())
     win_rate = float((strat_rets[strat_rets != 0] > 0).mean()) if (strat_rets != 0).any() else 0.0
-    curve = [
-        {"ts": str(df.iloc[i].get("ts", i)), "equity": float(equity.iloc[i])}
-        for i in range(0, len(equity), max(1, len(equity) // 100))
-    ]
+    step = max(1, len(equity) // 100)
+
+    def _curve(series: pd.Series, key: str) -> list[dict[str, Any]]:
+        return [
+            {"ts": str(df.iloc[i].get("ts", i)), key: float(series.iloc[i])}
+            for i in range(0, len(series), step)
+        ]
+
+    equity_curve = []
+    for i in range(0, len(equity), step):
+        equity_curve.append(
+            {
+                "ts": str(df.iloc[i].get("ts", i)),
+                "equity": float(equity.iloc[i]),
+                "buy_hold": float(buy_hold.iloc[i]),
+                "drawdown": float(drawdown.iloc[i]),
+            }
+        )
+
     return {
         "engine": "pandas",
         "strategy": "sma_crossover",
         "metrics": {
             "total_return": total_return,
+            "buy_hold_return": float(buy_hold.iloc[-1] - 1),
             "sharpe": sharpe,
             "max_drawdown": max_dd,
             "win_rate": win_rate,
             "trades": int(position.diff().abs().sum() / 2),
+            "alpha_vs_buy_hold": total_return - float(buy_hold.iloc[-1] - 1),
         },
-        "equity_curve": curve,
+        "equity_curve": equity_curve,
+        "drawdown_curve": _curve(drawdown, "drawdown"),
         "params": {"fast": fast, "slow": slow, "fee_bps": fee_bps},
     }
 

@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analysis.fundamental import FundamentalService
 from app.analysis.news import NewsService
 from app.analysis.technical import latest_snapshot, series_for_chart
+from app.analysis.accuracy import evaluate_walk_forward
+from app.analysis.integrated import IntegratedAnalysisService
 from app.backtest.engine import BacktestService
 from app.brokers import get_broker, list_broker_status
 from app.brokers.base import BrokerOrderRequest
@@ -96,6 +98,17 @@ class RiskSizeBody(BaseModel):
     price: float
     stop_loss_pct: float | None = None
     risk_per_trade_pct: float = 0.01
+
+
+class AccuracyBody(BaseModel):
+    ticker: str
+    min_train: int = 40
+    max_points: int = 80
+
+
+class IntegratedBody(BaseModel):
+    ticker: str
+    collect_news: bool = True
 
 
 @router.get("/technical/{ticker}")
@@ -246,6 +259,44 @@ async def backtest_run(body: BacktestBody, db: AsyncSession = Depends(get_db)):
     engine = body.engine
     result = await svc.run_and_store(body.ticker, df, engine=engine, fast=body.fast, slow=body.slow)
     return result
+
+
+@router.post("/accuracy/evaluate")
+async def accuracy_evaluate(body: AccuracyBody, db: AsyncSession = Depends(get_db)):
+    """Walk-forward prediction accuracy for charts (hit-rate, MAE, pred vs actual)."""
+    df = await _ensure_bars(db, body.ticker, min_rows=body.min_train + 10, limit=400)
+    if len(df) < body.min_train + 5:
+        raise HTTPException(400, "Need more bars for accuracy evaluation. Run データ取込 first.")
+    result = evaluate_walk_forward(df, min_train=body.min_train, max_points=body.max_points)
+    if result.get("error") and not result.get("series"):
+        raise HTTPException(400, result["error"])
+    return {"ticker": body.ticker, **result}
+
+
+@router.get("/accuracy/{ticker}")
+async def accuracy_get(ticker: str, db: AsyncSession = Depends(get_db)):
+    df = await _ensure_bars(db, ticker, min_rows=50, limit=400)
+    if len(df) < 45:
+        raise HTTPException(400, "Need more bars for accuracy evaluation. Run データ取込 first.")
+    result = evaluate_walk_forward(df)
+    return {"ticker": ticker, **result}
+
+
+@router.post("/analysis/integrated")
+async def analysis_integrated(body: IntegratedBody, db: AsyncSession = Depends(get_db)):
+    """Fuse technical + fundamental + news into one scored recommendation."""
+    try:
+        return await IntegratedAnalysisService(db).run(body.ticker, collect_news=body.collect_news)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Integrated analysis failed: {e}") from e
+
+
+@router.get("/analysis/integrated/{ticker}")
+async def analysis_integrated_get(ticker: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await IntegratedAnalysisService(db).run(ticker, collect_news=True)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Integrated analysis failed: {e}") from e
 
 
 @router.post("/rag/ingest")

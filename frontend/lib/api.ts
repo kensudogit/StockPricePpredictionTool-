@@ -159,8 +159,56 @@ export type BacktestResult = {
   engine: string;
   strategy: string;
   metrics: Record<string, number | null>;
-  equity_curve: { ts: string; equity: number }[];
+  equity_curve: { ts: string; equity: number; buy_hold?: number; drawdown?: number }[];
+  drawdown_curve?: { ts: string; drawdown: number }[];
   warning?: string;
+};
+
+export type AccuracyPoint = {
+  ts: string;
+  close: number;
+  predicted_price: number;
+  actual_price: number;
+  predicted_return: number;
+  actual_return: number;
+  predicted_direction: string;
+  actual_direction: string;
+  correct: boolean;
+  confidence: number;
+  error: number;
+  model_equity?: number;
+  buy_hold_equity?: number;
+};
+
+export type AccuracyResult = {
+  ticker: string;
+  model?: string;
+  horizon?: string;
+  n_samples?: number;
+  metrics: Record<string, number | null>;
+  confusion?: { tp: number; tn: number; fp: number; fn: number };
+  series: AccuracyPoint[];
+  error?: string;
+};
+
+export type IntegratedAnalysis = {
+  ticker: string;
+  as_of: string;
+  signal: "buy" | "sell" | "hold" | string;
+  composite_score: number;
+  strength: number;
+  weights: { technical: number; fundamental: number; news: number };
+  scores: { technical: number; fundamental: number; news: number };
+  summary: string;
+  technical: { score: number; snapshot: Record<string, unknown>; reasons: string[] };
+  fundamental: { score: number; metrics: Fundamentals | null; reasons: string[] };
+  news: {
+    score: number;
+    meta: { count: number; avg_sentiment?: number | null; labels?: Record<string, number> };
+    articles: NewsItem[];
+    reasons: string[];
+  };
+  radar: { axis: string; value: number }[];
 };
 
 export type PipelineResult = {
@@ -206,6 +254,16 @@ export const api = {
     request<BacktestResult>("/backtest/run", {
       method: "POST",
       body: JSON.stringify({ ticker, engine, fast: 10, slow: 30 }),
+    }),
+  accuracy: (ticker: string) =>
+    request<AccuracyResult>("/accuracy/evaluate", {
+      method: "POST",
+      body: JSON.stringify({ ticker, min_train: 40, max_points: 80 }),
+    }),
+  integrated: (ticker: string, collectNews = true) =>
+    request<IntegratedAnalysis>("/analysis/integrated", {
+      method: "POST",
+      body: JSON.stringify({ ticker, collect_news: collectNews }),
     }),
   brokers: () => request<{ name: string; available: boolean }[]>("/brokers"),
   ragQuery: (question: string) =>

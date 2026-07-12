@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AnalysisCharts } from "@/components/AnalysisCharts";
+import { IntegratedAnalysisPanel } from "@/components/IntegratedAnalysisPanel";
 import { UsageGuidePanel } from "@/components/UsageGuidePanel";
 import {
   api,
+  type AccuracyResult,
   type BacktestResult,
   type Fundamentals,
   type Health,
+  type IntegratedAnalysis,
   type NewsItem,
   type Order,
   type PipelineResult,
@@ -54,6 +57,8 @@ export default function DashboardPage() {
   const [ml, setMl] = useState<Record<string, unknown> | null>(null);
   const [dl, setDl] = useState<Record<string, unknown> | null>(null);
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
+  const [accuracy, setAccuracy] = useState<AccuracyResult | null>(null);
+  const [integrated, setIntegrated] = useState<IntegratedAnalysis | null>(null);
   const [brokers, setBrokers] = useState<{ name: string; available: boolean }[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -236,6 +241,42 @@ export default function DashboardPage() {
           className={styles.btnGhost}
           disabled={busy}
           onClick={() =>
+            run("予測精度", async () => {
+              const res = await api.accuracy(ticker);
+              setAccuracy(res);
+              const hit = res.metrics?.direction_hit_rate;
+              return hit != null
+                ? `予測精度: 方向的中 ${(Number(hit) * 100).toFixed(1)}%（n=${res.n_samples ?? 0}）`
+                : "予測精度評価完了";
+            })
+          }
+        >
+          予測精度
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("統合分析", async () => {
+              const res = await api.integrated(ticker, true);
+              setIntegrated(res);
+              if (res.fundamental.metrics) setFundamentals(res.fundamental.metrics as Fundamentals);
+              if (res.news.articles?.length) setNews(res.news.articles);
+              try {
+                setTechnical(await api.technical(ticker));
+              } catch {
+                /* keep prior */
+              }
+              return `統合分析: ${res.signal.toUpperCase()} (${res.composite_score >= 0 ? "+" : ""}${res.composite_score.toFixed(2)})`;
+            })
+          }
+        >
+          統合分析
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
             run("RAG", async () => {
               const res = await api.ragQuery(`${ticker} の直近ニュースと注目点は？`);
               setRagAnswer(res.answer || "");
@@ -243,8 +284,7 @@ export default function DashboardPage() {
           }
         >
           RAG質問
-        </button>
-        <button
+        </button>        <button
           className={styles.btnPrimary}
           disabled={busy}
           onClick={() =>
@@ -261,9 +301,12 @@ export default function DashboardPage() {
 
       <AnalysisCharts
         technical={technical}
-        equityCurve={backtest?.equity_curve}
+        backtest={backtest}
+        accuracy={accuracy}
         tvSymbol={tvSymbolFor(ticker)}
       />
+
+      <IntegratedAnalysisPanel data={integrated} />
 
       <section className={styles.grid}>
         <article className={styles.panel}>
@@ -338,11 +381,31 @@ export default function DashboardPage() {
               <>
                 <li><span>Engine</span><strong>{backtest.engine}</strong></li>
                 <li><span>Return</span><strong className={styles.mono}>{((backtest.metrics.total_return ?? 0) * 100).toFixed(2)}%</strong></li>
+                <li><span>Buy&Hold</span><strong className={styles.mono}>{backtest.metrics.buy_hold_return != null ? ((backtest.metrics.buy_hold_return ?? 0) * 100).toFixed(2) + "%" : "—"}</strong></li>
                 <li><span>Sharpe</span><strong className={styles.mono}>{Number(backtest.metrics.sharpe ?? 0).toFixed(2)}</strong></li>
                 <li><span>MaxDD</span><strong className={styles.mono}>{((backtest.metrics.max_drawdown ?? 0) * 100).toFixed(2)}%</strong></li>
+                <li><span>WinRate</span><strong className={styles.mono}>{backtest.metrics.win_rate != null ? ((backtest.metrics.win_rate ?? 0) * 100).toFixed(1) + "%" : "—"}</strong></li>
               </>
             ) : (
               <li className={styles.empty}>「バックテスト」で実行</li>
+            )}
+          </ul>
+        </article>
+
+        <article className={styles.panel}>
+          <h2>予測精度</h2>
+          <ul className={styles.list}>
+            {accuracy?.metrics ? (
+              <>
+                <li><span>Hit Rate</span><strong className={styles.mono}>{((accuracy.metrics.direction_hit_rate ?? 0) * 100).toFixed(1)}%</strong></li>
+                <li><span>MAE</span><strong className={styles.mono}>{Number(accuracy.metrics.mae ?? 0).toFixed(2)}</strong></li>
+                <li><span>RMSE</span><strong className={styles.mono}>{Number(accuracy.metrics.rmse ?? 0).toFixed(2)}</strong></li>
+                <li><span>Model Ret</span><strong className={styles.mono}>{((accuracy.metrics.model_total_return ?? 0) * 100).toFixed(2)}%</strong></li>
+                <li><span>BH Ret</span><strong className={styles.mono}>{((accuracy.metrics.buy_hold_total_return ?? 0) * 100).toFixed(2)}%</strong></li>
+                <li><span>n</span><strong className={styles.mono}>{accuracy.n_samples ?? 0}</strong></li>
+              </>
+            ) : (
+              <li className={styles.empty}>「予測精度」で Walk-forward 評価</li>
             )}
           </ul>
         </article>

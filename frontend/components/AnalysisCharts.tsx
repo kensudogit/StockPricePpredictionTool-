@@ -13,19 +13,26 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import ReactECharts from "echarts-for-react";
-import type { TechnicalResponse } from "@/lib/api";
+import type { AccuracyResult, BacktestResult, TechnicalResponse } from "@/lib/api";
 import styles from "./charts.module.css";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
 type Props = {
   technical: TechnicalResponse | null;
-  equityCurve?: { ts: string; equity: number }[];
+  backtest?: BacktestResult | null;
+  accuracy?: AccuracyResult | null;
   tvSymbol?: string;
 };
 
-export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:7203" }: Props) {
+export function AnalysisCharts({
+  technical,
+  backtest = null,
+  accuracy = null,
+  tvSymbol = "TSE:7203",
+}: Props) {
   const series = technical?.series ?? [];
+  const equityCurve = backtest?.equity_curve ?? [];
   const chartRef = useRef<HTMLDivElement>(null);
 
   const chartJsData = useMemo(
@@ -113,15 +120,97 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
     };
   }, [series]);
 
-  const equityOption = useMemo(
-    () => ({
+  const equityOption = useMemo(() => {
+    const dates = equityCurve.map((e) => String(e.ts).slice(0, 10));
+    const hasBh = equityCurve.some((e) => e.buy_hold != null);
+    const hasDd = equityCurve.some((e) => e.drawdown != null);
+    return {
       backgroundColor: "transparent",
       tooltip: { trigger: "axis" },
-      xAxis: {
-        type: "category",
-        data: equityCurve.map((e) => String(e.ts).slice(0, 10)),
-        axisLabel: { color: "#8aa396" },
+      legend: {
+        data: ["Strategy", ...(hasBh ? ["Buy&Hold"] : []), ...(hasDd ? ["Drawdown"] : [])],
+        textStyle: { color: "#8aa396" },
       },
+      grid: [
+        { left: 50, right: 20, top: 40, height: hasDd ? "52%" : "70%" },
+        ...(hasDd ? [{ left: 50, right: 20, top: "68%", height: "20%" }] : []),
+      ],
+      xAxis: [
+        { type: "category", data: dates, axisLabel: { color: "#8aa396" }, gridIndex: 0 },
+        ...(hasDd
+          ? [{ type: "category", data: dates, axisLabel: { show: false }, gridIndex: 1 }]
+          : []),
+      ],
+      yAxis: [
+        {
+          type: "value",
+          scale: true,
+          axisLabel: { color: "#8aa396" },
+          splitLine: { lineStyle: { color: "#2a3a32" } },
+          gridIndex: 0,
+        },
+        ...(hasDd
+          ? [
+              {
+                type: "value",
+                scale: true,
+                axisLabel: { color: "#8aa396", formatter: (v: number) => `${(v * 100).toFixed(0)}%` },
+                splitLine: { show: false },
+                gridIndex: 1,
+              },
+            ]
+          : []),
+      ],
+      series: [
+        {
+          name: "Strategy",
+          type: "line",
+          data: equityCurve.map((e) => e.equity),
+          showSymbol: false,
+          areaStyle: { color: "rgba(61,214,140,0.15)" },
+          lineStyle: { color: "#3dd68c" },
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+        },
+        ...(hasBh
+          ? [
+              {
+                name: "Buy&Hold",
+                type: "line",
+                data: equityCurve.map((e) => e.buy_hold ?? null),
+                showSymbol: false,
+                lineStyle: { color: "#6b9fff", type: "dashed" },
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+              },
+            ]
+          : []),
+        ...(hasDd
+          ? [
+              {
+                name: "Drawdown",
+                type: "line",
+                data: equityCurve.map((e) => e.drawdown ?? null),
+                showSymbol: false,
+                areaStyle: { color: "rgba(232,93,93,0.2)" },
+                lineStyle: { color: "#e85d5d" },
+                xAxisIndex: 1,
+                yAxisIndex: 1,
+              },
+            ]
+          : []),
+      ],
+    };
+  }, [equityCurve]);
+
+  const accuracyPriceOption = useMemo(() => {
+    const pts = accuracy?.series ?? [];
+    const dates = pts.map((p) => String(p.ts).slice(0, 10));
+    return {
+      backgroundColor: "transparent",
+      tooltip: { trigger: "axis" },
+      legend: { data: ["Predicted", "Actual"], textStyle: { color: "#8aa396" } },
+      xAxis: { type: "category", data: dates, axisLabel: { color: "#8aa396" } },
       yAxis: {
         type: "value",
         scale: true,
@@ -130,19 +219,58 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
       },
       series: [
         {
+          name: "Predicted",
           type: "line",
-          data: equityCurve.map((e) => e.equity),
+          data: pts.map((p) => p.predicted_price),
           showSymbol: false,
-          areaStyle: { color: "rgba(61,214,140,0.15)" },
+          lineStyle: { color: "#e8b84a" },
+        },
+        {
+          name: "Actual",
+          type: "line",
+          data: pts.map((p) => p.actual_price),
+          showSymbol: false,
           lineStyle: { color: "#3dd68c" },
         },
       ],
-    }),
-    [equityCurve],
-  );
+    };
+  }, [accuracy]);
+
+  const accuracyEquityOption = useMemo(() => {
+    const pts = accuracy?.series ?? [];
+    const dates = pts.map((p) => String(p.ts).slice(0, 10));
+    return {
+      backgroundColor: "transparent",
+      tooltip: { trigger: "axis" },
+      legend: { data: ["Model", "Buy&Hold"], textStyle: { color: "#8aa396" } },
+      xAxis: { type: "category", data: dates, axisLabel: { color: "#8aa396" } },
+      yAxis: {
+        type: "value",
+        scale: true,
+        axisLabel: { color: "#8aa396" },
+        splitLine: { lineStyle: { color: "#2a3a32" } },
+      },
+      series: [
+        {
+          name: "Model",
+          type: "line",
+          data: pts.map((p) => p.model_equity),
+          showSymbol: false,
+          areaStyle: { color: "rgba(232,184,74,0.12)" },
+          lineStyle: { color: "#e8b84a" },
+        },
+        {
+          name: "Buy&Hold",
+          type: "line",
+          data: pts.map((p) => p.buy_hold_equity),
+          showSymbol: false,
+          lineStyle: { color: "#6b9fff", type: "dashed" },
+        },
+      ],
+    };
+  }, [accuracy]);
 
   useEffect(() => {
-    // iframe embed is more reliable than tv.js for JP symbols on Railway
     const el = chartRef.current;
     if (!el) return;
     el.innerHTML = "";
@@ -171,6 +299,9 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
     iframe.allowFullscreen = true;
     el.appendChild(iframe);
   }, [tvSymbol]);
+
+  const m = accuracy?.metrics;
+  const bm = backtest?.metrics;
 
   return (
     <div className={styles.wrap}>
@@ -209,9 +340,52 @@ export function AnalysisCharts({ technical, equityCurve = [], tvSymbol = "TYO:72
 
       {equityCurve.length > 0 && (
         <section className={styles.panelWide}>
-          <h3>Backtest Equity (ECharts)</h3>
-          <ReactECharts option={equityOption} style={{ height: 260 }} />
+          <h3>
+            Backtest — Strategy vs Buy&Hold / Drawdown
+            {bm?.total_return != null && (
+              <span className={styles.meta}>
+                {" "}
+                · Return {(Number(bm.total_return) * 100).toFixed(1)}%
+                {bm.buy_hold_return != null && ` · BH ${(Number(bm.buy_hold_return) * 100).toFixed(1)}%`}
+                {bm.sharpe != null && ` · Sharpe ${Number(bm.sharpe).toFixed(2)}`}
+                {bm.max_drawdown != null && ` · MaxDD ${(Number(bm.max_drawdown) * 100).toFixed(1)}%`}
+              </span>
+            )}
+          </h3>
+          <ReactECharts option={equityOption} style={{ height: 320 }} />
         </section>
+      )}
+
+      {accuracy && (accuracy.series?.length ?? 0) > 0 && (
+        <>
+          <section className={styles.panel}>
+            <h3>
+              予測精度 — Pred vs Actual
+              {m?.direction_hit_rate != null && (
+                <span className={styles.meta}>
+                  {" "}
+                  · Hit {(Number(m.direction_hit_rate) * 100).toFixed(1)}%
+                  {m.mae != null && ` · MAE ${Number(m.mae).toFixed(1)}`}
+                </span>
+              )}
+            </h3>
+            <ReactECharts option={accuracyPriceOption} style={{ height: 280 }} />
+          </section>
+          <section className={styles.panel}>
+            <h3>
+              予測精度 — Model Equity
+              {m?.model_total_return != null && (
+                <span className={styles.meta}>
+                  {" "}
+                  · Model {(Number(m.model_total_return) * 100).toFixed(1)}%
+                  {m.buy_hold_total_return != null &&
+                    ` · BH ${(Number(m.buy_hold_total_return) * 100).toFixed(1)}%`}
+                </span>
+              )}
+            </h3>
+            <ReactECharts option={accuracyEquityOption} style={{ height: 280 }} />
+          </section>
+        </>
       )}
     </div>
   );
