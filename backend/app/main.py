@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.analysis_routes import router as analysis_router
@@ -15,6 +15,15 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from app.db.bootstrap import init_database
+    from app.db.session import engine
+
+    try:
+        await init_database(engine)
+    except Exception as e:  # noqa: BLE001 — app should still boot; APIs may fail until DB ready
+        import logging
+
+        logging.getLogger("stockai").exception("DB bootstrap failed: %s", e)
     yield
 
 
@@ -45,7 +54,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="StockAI Agent Platform",
         description="株価予測・売買判断・リスク管理・SNS運用を統合するAIエージェントAPI",
-        version="0.2.0",
+        version="0.2.1",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -55,6 +64,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(_request: Request, exc: Exception):
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(exc), "type": type(exc).__name__},
+        )
+
     app.include_router(router, prefix="/api/v1")
     app.include_router(analysis_router, prefix="/api/v1")
     app.include_router(tests_router, prefix="/api/v1")
@@ -78,7 +95,6 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str):
-            # Never shadow API / OpenAPI UI
             blocked_prefixes = ("api/", "docs", "redoc", "openapi.json", "test-results")
             if full_path.startswith(blocked_prefixes) or full_path in {"docs", "redoc", "openapi.json"}:
                 raise HTTPException(status_code=404, detail="Not Found")

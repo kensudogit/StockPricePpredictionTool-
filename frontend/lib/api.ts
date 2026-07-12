@@ -12,7 +12,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText);
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string") throw new Error(parsed.detail);
+      throw new Error(text || res.statusText);
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text || res.statusText);
+      throw e;
+    }
   }
   return res.json() as Promise<T>;
 }

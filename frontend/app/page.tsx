@@ -53,41 +53,49 @@ export default function DashboardPage() {
 
   const refresh = useCallback(async (selected = ticker) => {
     setError(null);
+    const settled = await Promise.allSettled([
+      api.health(),
+      api.symbols(),
+      api.predictions(),
+      api.signals(),
+      api.orders(),
+      api.positions(),
+      api.risk(),
+      api.sns(),
+      api.news(),
+      api.brokers(),
+    ]);
+    const val = <T,>(i: number, fallback: T): T =>
+      settled[i].status === "fulfilled" ? (settled[i] as PromiseFulfilledResult<T>).value : fallback;
+
+    setHealth(val(0, null as Health | null));
+    setSymbols(val(1, [] as Symbol[]));
+    setPredictions(val(2, [] as Prediction[]));
+    setSignals(val(3, [] as Signal[]));
+    setOrders(val(4, [] as Order[]));
+    setPositions(val(5, [] as Position[]));
+    setRisk(val(6, [] as RiskEvent[]));
+    setSns(val(7, [] as SnsPost[]));
+    setNews(val(8, [] as NewsItem[]));
+    setBrokers(val(9, [] as { name: string; available: boolean }[]));
+
+    const failed = settled.filter((r) => r.status === "rejected");
+    if (failed.length === settled.length) {
+      const reason = (failed[0] as PromiseRejectedResult).reason;
+      setError(reason instanceof Error ? reason.message : "API接続に失敗しました");
+    } else if (failed.length > 0) {
+      setError(`${failed.length} 件のAPIが失敗しました（他は表示中）。再デプロイ後に「更新」してください。`);
+    }
+
     try {
-      const [h, s, p, sig, o, pos, r, posts, n, b] = await Promise.all([
-        api.health(),
-        api.symbols(),
-        api.predictions(),
-        api.signals(),
-        api.orders(),
-        api.positions(),
-        api.risk(),
-        api.sns(),
-        api.news(),
-        api.brokers(),
-      ]);
-      setHealth(h);
-      setSymbols(s);
-      setPredictions(p);
-      setSignals(sig);
-      setOrders(o);
-      setPositions(pos);
-      setRisk(r);
-      setSns(posts);
-      setNews(n);
-      setBrokers(b);
-      try {
-        setTechnical(await api.technical(selected));
-      } catch {
-        setTechnical(null);
-      }
-      try {
-        setFundamentals(await api.fundamentals(selected));
-      } catch {
-        setFundamentals(null);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "API接続に失敗しました");
+      setTechnical(await api.technical(selected));
+    } catch {
+      setTechnical(null);
+    }
+    try {
+      setFundamentals(await api.fundamentals(selected));
+    } catch {
+      setFundamentals(null);
     }
   }, [ticker]);
 

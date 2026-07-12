@@ -11,7 +11,7 @@ MODULES = [
     "app.config",
     "app.schemas",
     "app.db",
-    "app.db.session",
+    "app.db.bootstrap",
     "app.models",
     "app.api",
     "app.api.routes",

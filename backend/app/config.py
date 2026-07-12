@@ -21,6 +21,17 @@ def to_async_database_url(url: str) -> str:
         if u.startswith(old):
             u = new + u[len(old) :]
             break
+    # Drop libpq-only query params that break asyncpg; SSL is handled in session.connect_args
+    if "?" in u:
+        base, query = u.split("?", 1)
+        kept: list[str] = []
+        for part in query.split("&"):
+            key = part.split("=", 1)[0].lower()
+            if key in {"sslmode", "channel_binding", "sslrootcert", "sslcert", "sslkey"}:
+                continue
+            if part:
+                kept.append(part)
+        u = base if not kept else base + "?" + "&".join(kept)
     return u
 
 
