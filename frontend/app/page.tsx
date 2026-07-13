@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AnalysisCharts } from "@/components/AnalysisCharts";
+import { ChatAssistantPanel } from "@/components/ChatAssistantPanel";
+import { InsightPanel } from "@/components/InsightPanel";
 import { IntegratedAnalysisPanel } from "@/components/IntegratedAnalysisPanel";
 import { TradePanel } from "@/components/TradePanel";
 import { UsageGuidePanel } from "@/components/UsageGuidePanel";
@@ -11,6 +13,7 @@ import {
   type BacktestResult,
   type Fundamentals,
   type Health,
+  type InsightResult,
   type IntegratedAnalysis,
   type NewsItem,
   type Order,
@@ -60,6 +63,7 @@ export default function DashboardPage() {
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [accuracy, setAccuracy] = useState<AccuracyResult | null>(null);
   const [integrated, setIntegrated] = useState<IntegratedAnalysis | null>(null);
+  const [insight, setInsight] = useState<InsightResult | null>(null);
   const [brokers, setBrokers] = useState<{ name: string; available: boolean }[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -339,12 +343,48 @@ export default function DashboardPage() {
           className={styles.btnPrimary}
           disabled={busy}
           onClick={() =>
+            run("AIインサイト", async () => {
+              const res = await api.insight(ticker);
+              setInsight(res);
+              if (res.news?.articles?.length) setNews(res.news.articles);
+              if (res.backtest?.metrics) {
+                setBacktest({
+                  engine: res.backtest.engine || "pandas",
+                  strategy: res.backtest.strategy || "sma_crossover",
+                  metrics: res.backtest.metrics,
+                  equity_curve: [],
+                });
+              }
+              if (res.accuracy) {
+                setAccuracy({
+                  ticker,
+                  metrics: {
+                    direction_hit_rate: res.accuracy.direction_hit_rate ?? null,
+                    mae: res.accuracy.mae ?? null,
+                    rmse: res.accuracy.rmse ?? null,
+                    model_total_return: res.accuracy.model_total_return ?? null,
+                    buy_hold_total_return: res.accuracy.buy_hold_total_return ?? null,
+                  },
+                  series: [],
+                  n_samples: res.accuracy.n_samples,
+                });
+              }
+              return `AIインサイト: ${res.signal.label} / 予測 ${res.price.predicted_price.toFixed(1)} (信頼度 ${(res.confidence.value * 100).toFixed(0)}%)`;
+            })
+          }
+        >
+          {busy ? "実行中…" : "AIインサイト"}
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
             run("パイプライン完了", async () => {
               setPipeline(await api.runPipeline(ticker));
             })
           }
         >
-          {busy ? "実行中…" : "フルパイプライン"}
+          フルパイプライン
         </button>
       </section>
 
@@ -355,6 +395,16 @@ export default function DashboardPage() {
         backtest={backtest}
         accuracy={accuracy}
         tvSymbol={tvSymbolFor(ticker)}
+      />
+
+      <InsightPanel data={insight} />
+
+      <ChatAssistantPanel
+        ticker={ticker}
+        insight={insight}
+        busy={busy}
+        setBusy={setBusy}
+        onError={(msg) => setError(msg)}
       />
 
       <IntegratedAnalysisPanel data={integrated} />

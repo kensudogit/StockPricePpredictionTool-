@@ -218,6 +218,85 @@ export type PipelineResult = {
   error?: string;
 };
 
+export type ExplanationFeature = {
+  feature: string;
+  label: string;
+  value: number;
+  coefficient: number;
+  impact: number;
+};
+
+export type InsightResult = {
+  ok: boolean;
+  ticker: string;
+  as_of: string;
+  price: {
+    last_close: number;
+    predicted_price: number;
+    predicted_return: number;
+    direction: string;
+    confidence: number;
+    model: string;
+    horizon: string;
+    ml_predicted_price?: number | null;
+    ml_predicted_return?: number | null;
+  };
+  confidence: { value: number; label: string; note?: string };
+  signal: {
+    action: string;
+    label: string;
+    source: string;
+    strength: number;
+    confidence: number;
+  };
+  explanation: {
+    method: string;
+    note?: string;
+    features: ExplanationFeature[];
+    top_positive?: ExplanationFeature[];
+    top_negative?: ExplanationFeature[];
+  };
+  explanation_ml?: {
+    method: string;
+    features: ExplanationFeature[];
+  } | null;
+  narrative: string[];
+  news: {
+    summary: string;
+    articles: NewsItem[];
+    score?: number | null;
+  };
+  backtest: {
+    engine?: string;
+    strategy?: string;
+    metrics?: Record<string, number | null>;
+    error?: string;
+  };
+  accuracy: {
+    direction_hit_rate?: number | null;
+    mae?: number | null;
+    rmse?: number | null;
+    model_total_return?: number | null;
+    buy_hold_total_return?: number | null;
+    n_samples?: number;
+  };
+  integrated?: { scores?: Record<string, number>; summary?: string };
+};
+
+export type ChatResponse = {
+  ticker: string;
+  question: string;
+  intent: string;
+  answer: string;
+  session_id: string;
+  suggested?: string[];
+  insight_snapshot?: {
+    signal?: InsightResult["signal"];
+    price?: InsightResult["price"];
+    confidence?: InsightResult["confidence"];
+  };
+};
+
 export const api = {
   health: () => request<Health>("/health"),
   symbols: () => request<Symbol[]>("/symbols"),
@@ -285,6 +364,20 @@ export const api = {
       mode: string;
       ticker: string;
     }>("/brokers/order", { method: "POST", body: JSON.stringify(body) }),
+  insight: (ticker: string) =>
+    request<InsightResult>("/insight", {
+      method: "POST",
+      body: JSON.stringify({ ticker, collect_news: true, run_backtest: true }),
+    }),
+  chat: (body: { ticker: string; question: string; session_id?: string; intent?: string }) =>
+    request<ChatResponse>("/chat", {
+      method: "POST",
+      body: JSON.stringify({ session_id: "web", ...body }),
+    }),
+  chatHistory: (sessionId = "web") =>
+    request<{ id: number; role: string; content: string; created_at: string }[]>(
+      `/chat/history?session_id=${encodeURIComponent(sessionId)}`,
+    ),
   ragQuery: (question: string) =>
     request<{ answer?: string; context?: string; hits?: unknown[] }>("/rag/query", {
       method: "POST",

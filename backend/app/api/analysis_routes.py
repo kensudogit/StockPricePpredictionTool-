@@ -110,6 +110,19 @@ class IntegratedBody(BaseModel):
     collect_news: bool = True
 
 
+class InsightBody(BaseModel):
+    ticker: str
+    collect_news: bool = True
+    run_backtest: bool = True
+
+
+class ChatBody(BaseModel):
+    ticker: str
+    question: str
+    session_id: str = "web"
+    intent: str | None = None
+
+
 @router.get("/technical/{ticker}")
 async def technical_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
     df = await _ensure_bars(db, ticker, min_rows=30)
@@ -296,6 +309,67 @@ async def analysis_integrated_get(ticker: str, db: AsyncSession = Depends(get_db
         return await IntegratedAnalysisService(db).run(ticker, collect_news=True)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Integrated analysis failed: {e}") from e
+
+
+@router.post("/insight")
+async def insight_post(body: InsightBody, db: AsyncSession = Depends(get_db)):
+    """Unified AI insight: price, confidence, XAI, news summary, backtest, signal."""
+    from app.services.insight import InsightService
+
+    result = await InsightService(db).build(
+        body.ticker,
+        collect_news=body.collect_news,
+        run_backtest=body.run_backtest,
+        persist_prediction=True,
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "insight failed")
+    return result
+
+
+@router.get("/insight/{ticker}")
+async def insight_get(ticker: str, db: AsyncSession = Depends(get_db)):
+    from app.services.insight import InsightService
+
+    result = await InsightService(db).build(ticker, collect_news=True, run_backtest=True)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "insight failed")
+    return result
+
+
+@router.post("/chat")
+async def chat_assistant(body: ChatBody, db: AsyncSession = Depends(get_db)):
+    """Chat-style investment assistant (why buy / risk / news / backtest)."""
+    from app.services.chat_assistant import ChatAssistantService
+
+    if not body.question.strip():
+        raise HTTPException(400, "question is required")
+    return await ChatAssistantService(db).ask(
+        ticker=body.ticker,
+        question=body.question.strip(),
+        session_id=body.session_id or "web",
+        intent=body.intent,
+    )
+
+
+@router.get("/chat/history")
+async def chat_history(
+    session_id: str = Query("web"),
+    limit: int = Query(30, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {"id": r.id, "role": r.role, "content": r.content, "created_at": r.created_at}
+        for r in reversed(list(rows))
+    ]
 
 
 @router.post("/rag/ingest")

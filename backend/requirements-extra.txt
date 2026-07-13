@@ -3,3 +3,4 @@ catboost==1.2.7
 vectorbt==0.26.2
 torch==2.5.1
 tensorflow==2.18.0
+shap==0.46.0
