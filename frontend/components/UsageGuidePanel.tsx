@@ -18,13 +18,13 @@ const archDiagram = `銘柄選択
 データ取込 (Yahoo Chart API / Stooq)
     │ OHLCV → PostgreSQL
     ▼
-テクニカル / ファンダ / ニュースLLM
+テクニカル / ファンダ / ニュース
+    │ 統合分析 (ヒューリスティック)
+    ▼
+予測精度 · バックテスト（探索用）
     │
     ▼
-ML予測 · DL(LSTM) · RAG質問
-    │
-    ▼
-バックテスト · リスク · 証券API (paper)
+Paper 売買 UI（実口座未接続）
     │
     ▼
 フルパイプライン / テスト結果 (/tests)`;
@@ -33,21 +33,41 @@ const recommendedFlow = [
   "銘柄を選択（例: 7203.T トヨタ）",
   "「データ取込」→ 件数 N本 (yahoo) と表示されることを確認",
   "ECharts / Chart.js に価格線が出ることを確認",
-  "「ファンダ」「ニュース」でファンダ・センチメントを取得",
-  "「ML予測」「DL(LSTM)」で方向性を確認",
-  "必要なら「バックテスト」「RAG質問」→「フルパイプライン」",
+  "「統合分析」でテクニカル×ファンダ×ニュースの総合シグナルを確認",
+  "「予測精度」「バックテスト」で探索用の検証（売買根拠にはしない）",
+  "売買パネルで Paper の買う/売る → ポジション・注文を確認",
 ] as const;
 
 const chartTips = [
   "テクニカルが空のときは先に「データ取込」（0件なら外部配信遮断の可能性）",
   "TradingView は TSE:7203 形式。ウィジェット非対応の場合は TV 本体で確認",
-  "チャート更新後も空なら「更新」または再デプロイ後に再取込",
+  "「更新」で更新完了メッセージが出ることを確認（反応がないときは再デプロイ）",
+] as const;
+
+const readinessScores = [
+  "Demo / ポートフォリオ追跡: 74/100（E2Eデモ向き）",
+  "Paper 日常利用: 48/100（手動取込・定期ジョブなし）",
+  "日本株 本番売買: 12/100（国内証券はスタブ・未接続）",
+] as const;
+
+const readinessDo = [
+  "取込 → テクニカル / 統合分析 → Paper記録 までを常用フローにする",
+  "「予測精度」の Hit Rate は探索用（おおむね 48–55% 想定＝ランダム近傍）",
+  "ML/DL の confidence は毎回再学習のインサンプル値 → 売買根拠にしない",
+  "mode: paper では実口座に発注しない（模擬約定）",
+] as const;
+
+const readinessDont = [
+  "国内証券（SBI/楽天/カブコム）への本番発注は未実装",
+  "損切り・利確の自動執行ジョブは未実装（水準保存のみ）",
+  "バックテストは SMA 交差のみ・スリッページなし → 実資金サイズの根拠にしない",
+  "公開APIに認証なし → 本番キーを載せたまま無防備公開しない",
 ] as const;
 
 const steps = [
   {
     title: "0. 最短フロー（画面操作）",
-    body: "ダッシュボードのボタンだけで、取込→分析→予測まで一通り確認できます。",
+    body: "ダッシュボードだけで、取込→分析→Paper記録まで一通り確認できます。",
     items: [...recommendedFlow],
   },
   {
@@ -56,12 +76,12 @@ const steps = [
     items: [
       "API ok / mode: paper を確認（本番売買キー未設定時は paper）",
       "銘柄セレクトで対象ティッカーを選択",
-      "「更新」で最新の予測・注文・リスクを再取得",
+      "「更新」→「更新完了（銘柄）」と出れば正常",
     ],
   },
   {
     title: "2. 価格データ取込",
-    body: "テクニカル・ML・DL・バックテストの前提となる OHLCV を DB に入れます。",
+    body: "テクニカル・ML・DL・バックテスト・売買の前提となる OHLCV を DB に入れます。",
     items: [
       "「データ取込」を押す",
       "成功例: データ取込完了: 120本 (yahoo)",
@@ -80,58 +100,73 @@ const steps = [
     ],
   },
   {
-    title: "4. ファンダ・ニュース",
-    body: "ファンダメンタルとニュース LLM 分析を取得します。",
+    title: "4. ファンダ・ニュース・統合分析",
+    body: "3領域を個別取得するか、「統合分析」で一括スコア化します。",
     items: [
       "「ファンダ」→ PER / PBR / ROE など",
-      "「ニュース」→ 日経・ロイター等の収集とセンチメント",
-      "LLM キー未設定時はヒューリスティックにフォールバック",
+      "「ニュース」→ 収集とセンチメント（銘柄特化は弱め）",
+      "「統合分析」→ BUY/HOLD/SELL · レーダー · 根拠リスト",
+      "重みの目安: Technical 45% / Fundamental 30% / News 25%（ヒューリスティック）",
     ],
   },
   {
-    title: "5. ML / DL 予測",
-    body: "機械学習・深層学習モデルで短期方向を推定します。",
+    title: "5. ML / DL・予測精度（探索用）",
+    body: "方向性の参考と、Walk-forward による正直な精度確認です。売買根拠にはしません。",
     items: [
-      "「ML予測」→ sklearn / XGBoost 等の合意シグナル",
-      "「DL(LSTM)」→ LSTM（GRU / Transformer / TFT も API 可）",
-      "十分なバー本数が必要（取込後に実行）",
+      "「ML予測」→ 合意シグナル（毎回再学習・インサンプル信頼度に注意）",
+      "「DL(LSTM)」→ 短期方向（データが少ないと過学習しやすい）",
+      "「予測精度」→ Hit Rate / MAE · Pred vs Actual · Model vs Buy&Hold",
+      "的中率が 50% 前後でも異常ではない（ランダムウォーク近傍）",
     ],
   },
   {
-    title: "6. バックテスト・RAG・リスク",
-    body: "戦略検証と知識検索、リスクイベントを確認します。",
+    title: "6. バックテスト・RAG",
+    body: "SMA交差の簡易検証と知識検索です。",
     items: [
-      "「バックテスト」→ Return / Sharpe / MaxDD · エクイティ曲線",
-      "「RAG質問」→ ニュース等のベクトル検索回答",
-      "ポジション / リスクパネルでイベントを確認",
+      "「バックテスト」→ Strategy vs Buy&Hold / Drawdown",
+      "手数料 5bps のみ・スリッページなし・単元未考慮",
+      "「RAG質問」→ ニュース等の検索回答（埋め込みは簡易実装）",
     ],
   },
   {
-    title: "7. フルパイプライン",
-    body: "取込から分析・予測までを一括実行します。",
+    title: "7. Paper 売買（手動発注）",
+    body: "売買パネルから模擬の買う/売るを実行し、注文・ポジションを記録します。",
     items: [
-      "緑の「フルパイプライン」を押す",
-      "結果 JSON が画面下部に表示",
-      "個別ボタンと同じ処理をまとめて走らせる想定",
+      "数量・ブローカー（通常 paper）・成行/指値を指定",
+      "「買う」「売る」→ 約定メッセージと order_id を確認",
+      "ポジション / リスク · シグナル / 注文パネルで反映を確認",
+      "リスク前チェックあり。損切りの自動執行は未実装",
+      "SBI/楽天/カブコムはスタブ（契約・実装後に接続）",
     ],
   },
   {
-    title: "8. テスト結果の確認",
-    body: "pytest / Vitest の結果を Web で閲覧できます。",
+    title: "8. フルパイプライン・テスト",
+    body: "一括実行と品質確認です。",
     items: [
+      "緑の「フルパイプライン」→ 結果 JSON",
       "ヘッダー「テスト結果」または /tests/",
-      "API: /api/v1/tests/summary · report · run",
       "ローカル: python scripts/run_tests.py",
     ],
   },
   {
-    title: "9. 環境・デプロイメモ",
+    title: "9. 実用性能の目安（2026-07 評価）",
+    body: "コードレビューに基づくレディネスです。負荷実測ではありません。",
+    items: [
+      ...readinessScores,
+      "Usable: 日次取込 · テクニカル · Walk-forward · Paper売買UI",
+      "Prototype: ファンダ/ニュース/統合スコア/ML·DL/バックテスト",
+      "Stub / 未着手: 国内証券 · 損切り自動執行 · API認証 · Railway定期実行",
+    ],
+  },
+  {
+    title: "10. 環境・デプロイメモ",
     body: "Railway / Docker での運用時の注意点です。",
     items: [
       "DATABASE_URL（asyncpg）· DATABASE_SSL_VERIFY=false（必要時）",
       "OPENAI_MODEL=gpt-4o-mini など利用可能モデルを指定",
       "健康確認: /api/v1/health/live",
       "Python 3.12 推奨（3.14 は依存で失敗しやすい）",
+      "Railway は API 単体（Celery/Redis 定期ジョブはローカル Compose 向け）",
     ],
   },
 ] as const;
@@ -273,8 +308,8 @@ export function UsageGuidePanel({ open, onClose }: Props) {
             <p className={styles.heroKicker}>Portfolio-ready demo</p>
             <h2 className={styles.heroTitle}>StockAI — 分析 · 予測 · 売買</h2>
             <p className={styles.heroLead}>
-              データ取込からテクニカル / ファンダ / ニュースLLM / ML·DL / RAG / バックテスト /
-              リスクまでを一つの画面で再現するワークフローです。
+              データ取込からテクニカル / ファンダ / ニュース / 統合分析 / ML·DL / RAG / バックテスト /
+              Paper売買までを一つの画面で再現するデモ向けワークフローです。実資金の日本株発注は未接続です。
             </p>
             <div className={styles.stack} aria-label="Tech stack">
               {techStack.map((tag) => (
@@ -302,11 +337,42 @@ export function UsageGuidePanel({ open, onClose }: Props) {
               <strong>最短・安全な進め方</strong>
             </div>
             <p>
-              まず「データ取込」でバー本数を確保してから、チャートと予測ボタンを順に実行してください。件数 0
-              のまま先に進むとテクニカルが空のままになります。
+              まず「データ取込」でバー本数を確保し、統合分析まで進めてから Paper
+              記録します。ML/DL の数字は探索用で、売買根拠にはしません。
             </p>
             <ul className={styles.items}>
               {recommendedFlow.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+
+          <section className={styles.featured} aria-label="実用性能">
+            <div className={styles.featuredHead}>
+              <span className={styles.featuredBadge}>Readiness</span>
+              <strong>実用性能の目安（2026-07）</strong>
+            </div>
+            <p>
+              Demo 74 / Paper日常 48 / 日本株本番 12（100点満点・静的レビュー）。当面は取込→分析→Paper記録まで。
+            </p>
+            <ul className={styles.items}>
+              {readinessScores.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <p>
+              <strong>やってよいこと</strong>
+            </p>
+            <ul className={styles.items}>
+              {readinessDo.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <p>
+              <strong>やらないこと</strong>
+            </p>
+            <ul className={styles.items}>
+              {readinessDont.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
@@ -346,7 +412,7 @@ export function UsageGuidePanel({ open, onClose }: Props) {
           </ol>
 
           <p className={styles.footer}>
-            ▼▲ で開閉 · ドラッグで移動 · × で閉じる · テストは /tests · 取込件数を必ず確認
+            ▼▲ で開閉 · ドラッグで移動 · × で閉じる · 常用は取込→統合分析→Paper · ML/DLは探索用 · 本番日本株は未接続
           </p>
         </div>
       ) : null}
