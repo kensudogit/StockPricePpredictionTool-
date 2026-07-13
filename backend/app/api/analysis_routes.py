@@ -15,8 +15,7 @@ from app.analysis.technical import latest_snapshot, series_for_chart
 from app.analysis.accuracy import evaluate_walk_forward
 from app.analysis.integrated import IntegratedAnalysisService
 from app.backtest.engine import BacktestService
-from app.brokers import get_broker, list_broker_status
-from app.brokers.base import BrokerOrderRequest
+from app.brokers import list_broker_status
 from app.db.session import get_db
 from app.dl.models import DeepLearningService
 from app.llm.clients import NewsLLMService
@@ -342,23 +341,41 @@ async def brokers():
 
 
 @router.post("/brokers/order")
-async def brokers_order(body: BrokerOrderBody):
-    broker = get_broker(body.broker)
-    result = await broker.place_order(
-        BrokerOrderRequest(
-            ticker=body.ticker,
-            side=body.side,
-            quantity=body.quantity,
-            order_type=body.order_type,
-            limit_price=body.limit_price,
-        )
+async def brokers_order(body: BrokerOrderBody, db: AsyncSession = Depends(get_db)):
+    """Manual trade: risk-checked broker order + DB order/position update."""
+    from app.services.trading import OrderService
+
+    if body.side.lower() not in {"buy", "sell"}:
+        raise HTTPException(400, "side must be buy or sell")
+    if body.quantity <= 0:
+        raise HTTPException(400, "quantity must be positive")
+
+    # Ensure symbol + price
+    df = await _ensure_bars(db, body.ticker, min_rows=5, limit=30)
+    symbol_id = await get_symbol_id(db, body.ticker)
+    if not symbol_id:
+        from app.services.ingestion import DataIngestionService
+
+        sym = await DataIngestionService(db).ensure_symbol(body.ticker)
+        symbol_id = sym.id
+
+    if df.empty:
+        raise HTTPException(400, "No price data. Run データ取込 first.")
+    last_price = float(df.iloc[-1]["close"])
+
+    result = await OrderService(db).place_manual(
+        symbol_id=symbol_id,
+        ticker=body.ticker,
+        side=body.side,
+        quantity=body.quantity,
+        price=last_price,
+        broker_name=body.broker,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
     )
-    return {
-        "broker": result.broker,
-        "status": result.status,
-        "broker_order_id": result.broker_order_id,
-        "raw": result.raw,
-    }
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "order failed")
+    return result
 
 
 @router.post("/risk/position-size")

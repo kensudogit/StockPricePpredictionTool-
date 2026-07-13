@@ -136,6 +136,120 @@ class OrderService:
         await self.db.refresh(order)
         return order
 
+    async def place_manual(
+        self,
+        *,
+        symbol_id: int,
+        ticker: str,
+        side: str,
+        quantity: float,
+        price: float,
+        broker_name: str | None = None,
+        order_type: str = "market",
+        limit_price: float | None = None,
+        equity: float = 10_000_000,
+        daily_pnl: float = 0,
+    ) -> dict:
+        """Manual buy/sell: risk check → broker → persist order/position."""
+        from app.brokers import get_broker
+        from app.brokers.base import BrokerOrderRequest
+
+        side = side.lower().strip()
+        if side not in {"buy", "sell"}:
+            return {"ok": False, "error": "side must be buy or sell"}
+        if quantity <= 0:
+            return {"ok": False, "error": "quantity must be positive"}
+        if price <= 0:
+            return {"ok": False, "error": "price must be positive"}
+
+        fill_price = float(limit_price) if order_type == "limit" and limit_price else float(price)
+        notional = quantity * fill_price
+        ok, reason = await self.risk.check_order(equity=equity, order_notional=notional, daily_pnl=daily_pnl)
+        if not ok:
+            self.db.add(
+                RiskEvent(
+                    event_type="order_rejected",
+                    severity="warning",
+                    message=reason,
+                    details={"ticker": ticker, "side": side, "quantity": quantity},
+                )
+            )
+            await self.db.commit()
+            return {"ok": False, "error": reason, "rejected": True}
+
+        broker = get_broker(broker_name)
+        broker_result = await broker.place_order(
+            BrokerOrderRequest(
+                ticker=ticker,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                limit_price=limit_price,
+            )
+        )
+        if broker_result.status in {"unconfigured", "stub", "error"}:
+            return {
+                "ok": False,
+                "error": f"broker {broker_result.broker}: {broker_result.status}",
+                "broker": broker_result.broker,
+                "raw": broker_result.raw,
+            }
+
+        mode = self.settings.trading_mode
+        if mode == "paper" and broker_result.broker == "paper":
+            status = "filled"
+        elif broker_result.status == "filled":
+            status = "filled"
+        else:
+            status = broker_result.status
+
+        order = Order(
+            symbol_id=symbol_id,
+            signal_id=None,
+            side=side,
+            order_type=order_type,
+            quantity=Decimal(str(quantity)),
+            limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
+            status=status,
+            mode=mode,
+            broker_order_id=broker_result.broker_order_id,
+            filled_qty=Decimal(str(quantity)) if status == "filled" else Decimal("0"),
+            avg_fill_price=Decimal(str(fill_price)) if status == "filled" else None,
+            updated_at=datetime.now(timezone.utc),
+        )
+        self.db.add(order)
+
+        if status == "filled":
+            await self._update_position(symbol_id, side, quantity, fill_price)
+            await self.db.flush()
+            pos = (
+                await self.db.execute(select(Position).where(Position.symbol_id == symbol_id))
+            ).scalar_one_or_none()
+            if pos and side == "buy":
+                await self.risk.attach_stops(
+                    position_id=pos.id,
+                    symbol_id=symbol_id,
+                    side="buy",
+                    entry_price=fill_price,
+                    quantity=quantity,
+                )
+
+        await self.db.commit()
+        await self.db.refresh(order)
+        return {
+            "ok": True,
+            "order_id": order.id,
+            "broker": broker_result.broker,
+            "status": order.status,
+            "broker_order_id": order.broker_order_id,
+            "side": side,
+            "quantity": quantity,
+            "avg_fill_price": float(order.avg_fill_price) if order.avg_fill_price is not None else None,
+            "mode": order.mode,
+            "ticker": ticker,
+            "raw": broker_result.raw,
+        }
+
     async def _update_position(self, symbol_id: int, side: str, qty: float, price: float) -> None:
         result = await self.db.execute(select(Position).where(Position.symbol_id == symbol_id))
         pos = result.scalar_one_or_none()

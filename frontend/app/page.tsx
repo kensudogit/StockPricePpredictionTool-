@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnalysisCharts } from "@/components/AnalysisCharts";
 import { IntegratedAnalysisPanel } from "@/components/IntegratedAnalysisPanel";
+import { TradePanel } from "@/components/TradePanel";
 import { UsageGuidePanel } from "@/components/UsageGuidePanel";
 import {
   api,
@@ -357,6 +358,35 @@ export default function DashboardPage() {
       />
 
       <IntegratedAnalysisPanel data={integrated} />
+
+      <TradePanel
+        ticker={ticker}
+        lastPrice={
+          technical?.snapshot?.close != null ? Number(technical.snapshot.close) : null
+        }
+        mode={health?.trading_mode}
+        brokers={brokers}
+        positions={positions}
+        busy={busy}
+        onSubmit={async ({ side, quantity, broker, orderType, limitPrice }) => {
+          await run(
+            side === "buy" ? "買い注文" : "売り注文",
+            async () => {
+              const res = await api.placeOrder({
+                ticker,
+                side,
+                quantity,
+                broker,
+                order_type: orderType,
+                limit_price: limitPrice,
+              });
+              return `${side === "buy" ? "買" : "売"}い約定: ${res.quantity}株 @ ${
+                res.avg_fill_price ?? "—"
+              }（${res.broker}/${res.mode} · #${res.order_id}）`;
+            },
+          );
+        }}
+      />
 
       <section className={styles.grid}>
         <article className={styles.panel}>

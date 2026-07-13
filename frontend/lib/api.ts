@@ -266,6 +266,25 @@ export const api = {
       body: JSON.stringify({ ticker, collect_news: collectNews }),
     }),
   brokers: () => request<{ name: string; available: boolean }[]>("/brokers"),
+  placeOrder: (body: {
+    ticker: string;
+    side: "buy" | "sell";
+    quantity: number;
+    broker?: string;
+    order_type?: string;
+    limit_price?: number;
+  }) =>
+    request<{
+      ok: boolean;
+      order_id: number;
+      broker: string;
+      status: string;
+      side: string;
+      quantity: number;
+      avg_fill_price?: number | null;
+      mode: string;
+      ticker: string;
+    }>("/brokers/order", { method: "POST", body: JSON.stringify(body) }),
   ragQuery: (question: string) =>
     request<{ answer?: string; context?: string; hits?: unknown[] }>("/rag/query", {
       method: "POST",
