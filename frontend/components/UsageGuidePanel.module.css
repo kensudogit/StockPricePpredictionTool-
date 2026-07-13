@@ -9,8 +9,8 @@
   right: 1rem;
   top: 4.5rem;
   z-index: 60;
-  width: min(780px, calc(100vw - 2rem));
-  max-width: 780px;
+  width: min(420px, calc(100vw - 2rem));
+  max-width: 420px;
   color: var(--ug-ink);
   border-radius: 12px;
   border: 1px solid var(--ug-line);

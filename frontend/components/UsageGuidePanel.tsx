@@ -151,7 +151,7 @@ export function UsageGuidePanel({ open, onClose }: Props) {
     originY: number;
   } | null>(null);
 
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -199,7 +199,7 @@ export function UsageGuidePanel({ open, onClose }: Props) {
           top: pos.y,
           right: "auto",
           bottom: "auto",
-          width: "min(780px, calc(100vw - 2rem))",
+          width: "min(420px, calc(100vw - 2rem))",
           margin: 0,
         } as const)
       : undefined;

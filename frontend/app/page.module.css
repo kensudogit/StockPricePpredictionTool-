@@ -81,6 +81,8 @@ button.pill {
 }
 
 .controls {
+  position: relative;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;

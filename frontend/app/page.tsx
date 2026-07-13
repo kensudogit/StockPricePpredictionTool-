@@ -65,10 +65,9 @@ export default function DashboardPage() {
   const [pipeline, setPipeline] = useState<PipelineResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ragAnswer, setRagAnswer] = useState<string | null>(null);
-  const [guideOpen, setGuideOpen] = useState(true);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const refresh = useCallback(async (selected = ticker) => {
-    setError(null);
     const settled = await Promise.allSettled([
       api.health(),
       api.symbols(),
@@ -96,15 +95,18 @@ export default function DashboardPage() {
     setBrokers(val(9, [] as { name: string; available: boolean }[]));
 
     const failed = settled.filter((r) => r.status === "rejected");
+    let softError: string | null = null;
     if (failed.length === settled.length) {
       const reason = (failed[0] as PromiseRejectedResult).reason;
-      setError(reason instanceof Error ? reason.message : "API接続に失敗しました");
+      softError = reason instanceof Error ? reason.message : "API接続に失敗しました";
     } else if (failed.length > 0) {
-      setError(`${failed.length} 件のAPIが失敗しました（他は表示中）。再デプロイ後に「更新」してください。`);
+      softError = `${failed.length} 件のAPIが失敗しました（他は表示中）`;
     }
 
+    let techOk = false;
     try {
       setTechnical(await api.technical(selected));
+      techOk = true;
     } catch {
       setTechnical(null);
     }
@@ -113,11 +115,35 @@ export default function DashboardPage() {
     } catch {
       setFundamentals(null);
     }
+
+    return { softError, techOk, failedCount: failed.length };
   }, [ticker]);
 
   useEffect(() => {
-    refresh();
+    void refresh().then((r) => {
+      if (r.softError) setError(r.softError);
+    });
   }, [refresh]);
+
+  const handleRefresh = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const r = await refresh(ticker);
+      if (r.softError) {
+        setError(r.softError);
+      } else if (!r.techOk) {
+        setError("更新しましたがテクニカル取得に失敗しました。データ取込を試してください。");
+      } else {
+        setMessage(`更新完了（${ticker}）`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -130,7 +156,8 @@ export default function DashboardPage() {
       } else {
         setMessage(label);
       }
-      await refresh();
+      const r = await refresh();
+      if (r.softError) setError(r.softError);
     } catch (e) {
       setError(e instanceof Error ? e.message : label + " 失敗");
     } finally {
@@ -173,7 +200,23 @@ export default function DashboardPage() {
       <section className={styles.controls}>
         <label className={styles.field}>
           <span>銘柄</span>
-          <select value={ticker} onChange={(e) => setTicker(e.target.value)}>
+          <select
+            value={ticker}
+            onChange={(e) => {
+              const next = e.target.value;
+              setTicker(next);
+              setBusy(true);
+              setMessage(null);
+              setError(null);
+              void refresh(next)
+                .then((r) => {
+                  if (r.softError) setError(r.softError);
+                  else setMessage(`銘柄切替: ${next}`);
+                })
+                .catch((err) => setError(err instanceof Error ? err.message : "銘柄切替に失敗"))
+                .finally(() => setBusy(false));
+            }}
+          >
             {(symbols.length ? symbols : [{ ticker: DEFAULT_TICKER } as Symbol]).map((s) => (
               <option key={s.ticker} value={s.ticker}>
                 {s.ticker} {s.name ? `— ${s.name}` : ""}
@@ -181,7 +224,14 @@ export default function DashboardPage() {
             ))}
           </select>
         </label>
-        <button className={styles.btnGhost} disabled={busy} onClick={() => refresh()}>更新</button>
+        <button
+          type="button"
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() => void handleRefresh()}
+        >
+          {busy ? "更新中…" : "更新"}
+        </button>
         <button
           className={styles.btnGhost}
           disabled={busy}
