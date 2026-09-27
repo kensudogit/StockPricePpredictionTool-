@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { api, type ChatResponse, type InsightResult } from "@/lib/api";
 import styles from "./chat.module.css";
 
@@ -112,8 +113,8 @@ export function ChatAssistantPanel({ ticker, insight, busy, setBusy, onError }: 
           placeholder="例: なぜ買い判断なのか？ 最大リスクは？"
           onChange={(e) => setInput(e.target.value)}
         />
-        <button type="submit" disabled={busy || !input.trim()}>
-          {busy ? "…" : "送信"}
+        <button type="submit" disabled={busy || !input.trim()} aria-label={busy ? "送信中" : "送信"}>
+          {busy ? <LoadingSpinner size="sm" label="送信中" /> : "送信"}
         </button>
       </form>
     </article>

@@ -5,6 +5,7 @@ import { AnalysisCharts } from "@/components/AnalysisCharts";
 import { ChatAssistantPanel } from "@/components/ChatAssistantPanel";
 import { InsightPanel } from "@/components/InsightPanel";
 import { IntegratedAnalysisPanel } from "@/components/IntegratedAnalysisPanel";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { TradePanel } from "@/components/TradePanel";
 import { UsageGuidePanel } from "@/components/UsageGuidePanel";
 import {
@@ -69,7 +70,7 @@ export default function DashboardPage() {
   const [integrated, setIntegrated] = useState<IntegratedAnalysis | null>(null);
   const [insight, setInsight] = useState<InsightResult | null>(null);
   const [brokers, setBrokers] = useState<{ name: string; available: boolean }[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,9 +145,12 @@ export default function DashboardPage() {
   }, [ticker]);
 
   useEffect(() => {
-    void refresh().then((r) => {
-      if (r.softError) setError(r.softError);
-    });
+    setBusy(true);
+    void refresh()
+      .then((r) => {
+        if (r.softError) setError(r.softError);
+      })
+      .finally(() => setBusy(false));
   }, [refresh]);
 
   const handleRefresh = async () => {
@@ -190,7 +194,12 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className={styles.page}>
+    <main className={styles.page} aria-busy={busy}>
+      {busy ? (
+        <div className={styles.loadingOverlay}>
+          <LoadingSpinner size="md" label="処理中" />
+        </div>
+      ) : null}
       <header className={styles.hero}>
         <div className={styles.brandBlock}>
           <p className={styles.brand}>StockAI</p>
@@ -257,7 +266,7 @@ export default function DashboardPage() {
           disabled={busy}
           onClick={() => void handleRefresh()}
         >
-          {busy ? "更新中…" : "更新"}
+          {busy ? <span className={styles.btnSpinner}><LoadingSpinner size="sm" label="更新中" /></span> : "更新"}
         </button>
         <button
           className={styles.btnGhost}
@@ -487,7 +496,7 @@ export default function DashboardPage() {
             })
           }
         >
-          {busy ? "実行中…" : "AIインサイト"}
+          {busy ? <span className={styles.btnSpinner}><LoadingSpinner size="sm" label="実行中" /></span> : "AIインサイト"}
         </button>
         <button
           className={styles.btnGhost}

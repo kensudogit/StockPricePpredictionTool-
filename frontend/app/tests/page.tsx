@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import styles from "../page.module.css";
 
 type Case = {
@@ -89,7 +90,12 @@ export default function TestsPage() {
   const totals = summary?.totals;
 
   return (
-    <main className={styles.page}>
+    <main className={styles.page} aria-busy={busy}>
+      {busy ? (
+        <div className={styles.loadingOverlay}>
+          <LoadingSpinner size="md" label="テスト実行中" />
+        </div>
+      ) : null}
       <header className={styles.hero}>
         <div>
           <p className={styles.brand}>StockAI</p>
@@ -114,7 +120,13 @@ export default function TestsPage() {
           再読込
         </button>
         <button className={styles.btnPrimary} disabled={busy} onClick={runTests}>
-          {busy ? "実行中…" : "全テスト実行"}
+          {busy ? (
+            <span className={styles.btnSpinner}>
+              <LoadingSpinner size="sm" label="実行中" />
+            </span>
+          ) : (
+            "全テスト実行"
+          )}
         </button>
       </section>
 

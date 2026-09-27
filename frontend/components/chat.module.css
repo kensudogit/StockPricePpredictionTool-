@@ -119,6 +119,10 @@
   color: #06140c;
   font-weight: 700;
   cursor: pointer;
+  min-width: 4.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .composer button:disabled {

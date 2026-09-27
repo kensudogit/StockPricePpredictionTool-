@@ -13,6 +13,7 @@ describe("TypeScript source inventory", () => {
     "app/layout.tsx",
     "lib/api.ts",
     "components/AnalysisCharts.tsx",
+    "components/LoadingSpinner.tsx",
   ];
 
   it.each(targets)("%s exists and has content", (rel) => {
