@@ -36,7 +36,7 @@ API: `POST /api/v1/fundamentals/ingest`, `GET /api/v1/fundamentals/{ticker}`
 毎回 **walk-forward OOS**（方向的中率・手数料込み戦略リターン）を `evidence` に載せる。  
 `evidence.ok` が false ならシグナルは様子見。in-sample の confidence だけでは発注しない。
 
-利益関門（`assess_edge` / `GET /api/v1/trading/plan/{ticker}`）は、手数料控除後の OOS 期待値・Sharpe・予測幅・トレンド一致が揃ったときだけ buy/sell する。数量はリスク予算×期待値スケールに Quarter-Kelly の上限を掛ける。利益は保証しない。
+利益関門（`assess_edge` / `GET /api/v1/trading/plan/{ticker}`）は、60 日と 120 日の両方で手数料＋スプレッド控除後の EV が残るときだけ buy/sell する。長い窓の的中 z≥1、20 日モメンタムと日経平均の方向、東証単元（既定 100 株）も見る。数量はリスク予算×期待値スケールに Quarter-Kelly の上限を掛け、単元に切り捨てる。寄り前は当日未確定足を使わない。利益は保証しない。
 
 期待値の寄せ方:
 

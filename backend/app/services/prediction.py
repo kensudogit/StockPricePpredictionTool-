@@ -95,6 +95,9 @@ class PredictionService:
 
     async def predict(self, ticker: str, horizon: str = "1d") -> PredictionResult | None:
         df = await self._load_bars(ticker)
+        from app.analysis.session import drop_incomplete_tokyo_session
+
+        df = drop_incomplete_tokyo_session(df)
         if len(df) < 40:
             return None
         feat = _build_features(df)
@@ -118,15 +121,19 @@ class PredictionService:
         pred_price = _ols_predict(Xn, y_price_train, xl)
         direction, confidence = _dir_confidence(Xn, y_dir_train, xl)
 
-        from app.analysis.evidence import build_ols_evidence
+        from app.analysis.evidence import build_robust_evidence
         from app.config import get_settings
 
         settings = get_settings()
-        evidence = build_ols_evidence(
+        cost_bps = float(settings.paper_fee_bps) + float(settings.spread_bps)
+        evidence = build_robust_evidence(
             df,
             min_hit_rate=settings.min_oos_hit_rate,
             min_samples=settings.min_oos_samples,
-            fee_bps=settings.paper_fee_bps,
+            fee_bps=cost_bps,
+            long_points=settings.oos_confirm_points,
+            min_expected_value=settings.min_expected_value,
+            min_hit_z=settings.min_hit_z,
         )
         evidence_ok = bool(evidence.get("ok"))
         oos_hit = evidence.get("direction_hit_rate")

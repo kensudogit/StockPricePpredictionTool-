@@ -147,6 +147,8 @@ export function TradePanel({
           利益関門: {plan.ok ? `通過（${plan.action}）` : "見送り"}
           {plan.expected_value != null ? ` · EV ${(plan.expected_value * 10000).toFixed(1)}bps` : ""}
           {plan.expected_yen != null ? ` · 期待 ${Math.round(plan.expected_yen).toLocaleString()}円` : ""}
+          {plan.hit_z != null ? ` · z ${plan.hit_z.toFixed(2)}` : ""}
+          {plan.lot ? ` · 単元 ${plan.lot}` : ""}
           {plan.suggested_qty ? ` · 推奨 ${plan.suggested_qty}株` : ""}
           {plan.block_reason ? ` · ${plan.block_reason}` : ""}
           {plan.suggested_qty ? (

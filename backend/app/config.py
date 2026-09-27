@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     kelly_fraction: float = 0.25
     trail_stop_pct: float = 0.02
     lock_profit_r: float = 1.0
+    min_hit_z: float = 1.0
+    oos_confirm_points: int = 120
+    require_long_window: bool = True
+    require_momentum_align: bool = True
+    require_index_align: bool = True
+    spread_bps: float = 5.0
+    jp_lot_size: int = 100
+    index_ticker: str = "^N225"
     broker_api_key: str = ""
     broker_api_secret: str = ""
     broker_base_url: str = ""

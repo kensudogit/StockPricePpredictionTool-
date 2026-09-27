@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analysis.session import lot_size_for, round_to_lot
 from app.config import Settings, get_settings
 from app.risk.manager import EnhancedRiskManager
 from app.trading.expectancy import expected_yen, kelly_fraction, profit_score
@@ -26,17 +27,22 @@ def assess_edge(
     equity: float = 10_000_000,
     settings: Settings | None = None,
     risk: EnhancedRiskManager | None = None,
+    ticker: str | None = None,
+    index_trend: str | None = None,
+    mom_return: float | None = None,
 ) -> dict[str, Any]:
     """Return a sized buy/sell/hold plan. Hold unless after-fee OOS EV is positive."""
     s = settings or get_settings()
     evd = evidence or {}
-    fee = float(s.paper_fee_bps) / 10000.0
+    fee = (float(s.paper_fee_bps) + float(s.spread_bps)) / 10000.0
     pred_ret = _predicted_return(float(last_close or 0), float(predicted_price or 0))
     hit = float(evd.get("direction_hit_rate") or 0.0)
     oos_ret = float(evd.get("oos_strategy_return") or 0.0)
     sharpe = float(evd.get("oos_sharpe") or 0.0)
     expected = float(evd.get("expected_value") or 0.0)
     n = int(evd.get("n_samples") or 0)
+    hit_z = float(evd.get("hit_z") or 0.0)
+    lot = lot_size_for(ticker or "", s.jp_lot_size)
 
     reasons: list[str] = []
     if not evd.get("ok"):
@@ -59,6 +65,17 @@ def assess_edge(
             reasons.append("counter-trend long blocked")
         if direction == "down" and trend == "uptrend":
             reasons.append("counter-trend short blocked")
+    idx = (index_trend or "unknown").lower()
+    if s.require_index_align and idx in {"uptrend", "downtrend"}:
+        if direction == "up" and idx == "downtrend":
+            reasons.append("index downtrend blocks long")
+        if direction == "down" and idx == "uptrend":
+            reasons.append("index uptrend blocks short")
+    if s.require_momentum_align and mom_return is not None:
+        if direction == "up" and mom_return <= 0:
+            reasons.append("20d momentum not up")
+        if direction == "down" and mom_return >= 0:
+            reasons.append("20d momentum not down")
     if rsi is not None:
         if direction == "up" and rsi >= s.rsi_overbought:
             reasons.append(f"RSI {rsi:.1f} overbought")
@@ -92,6 +109,12 @@ def assess_edge(
         qty = float(max(0.0, base * scale))
         if kelly > 0:
             qty = min(qty, equity * kelly / price)
+        qty = round_to_lot(qty, lot)
+        if qty < lot:
+            reasons.append(f"qty below lot {lot}")
+            ok = False
+            action = "hold"
+            qty = 0.0
     yen = expected_yen(qty, price, expected) if qty and price else 0.0
 
     return {
@@ -107,11 +130,15 @@ def assess_edge(
         "oos_strategy_return": oos_ret,
         "oos_sharpe": sharpe,
         "direction_hit_rate": hit,
+        "hit_z": round(hit_z, 3),
         "n_samples": n,
         "trend": trend,
+        "index_trend": idx,
+        "mom_return": mom_return,
+        "lot": lot,
         "rsi": rsi,
         "size_scale": scale,
         "suggested_qty": round(qty, 4),
         "equity": equity,
-        "note": "No guaranteed profit. Trades only when walk-forward EV after fees is positive.",
+        "note": "No guaranteed profit. Dual-window OOS, costs, lot, and regime must agree.",
     }

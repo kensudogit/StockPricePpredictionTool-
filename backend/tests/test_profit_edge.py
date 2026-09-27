@@ -84,6 +84,51 @@ class TestAssessEdge(unittest.TestCase):
         self.assertEqual(plan["action"], "buy")
         self.assertGreater(plan["suggested_qty"], 0)
 
+    def test_hold_index_regime(self):
+        plan = assess_edge(
+            evidence=_good_evidence(),
+            direction="up",
+            last_close=100,
+            predicted_price=103,
+            trend="uptrend",
+            rsi=50,
+            index_trend="downtrend",
+            settings=_settings(),
+        )
+        self.assertEqual(plan["action"], "hold")
+        self.assertIn("index downtrend", plan["block_reason"] or "")
+
+    def test_hold_against_momentum(self):
+        plan = assess_edge(
+            evidence=_good_evidence(),
+            direction="up",
+            last_close=100,
+            predicted_price=103,
+            trend="uptrend",
+            rsi=50,
+            mom_return=-0.04,
+            settings=_settings(),
+        )
+        self.assertEqual(plan["action"], "hold")
+        self.assertIn("momentum", plan["block_reason"] or "")
+
+    def test_jp_lot_rounding(self):
+        risk = EnhancedRiskManager(MagicMock())
+        plan = assess_edge(
+            evidence=_good_evidence(),
+            direction="up",
+            last_close=2500,
+            predicted_price=2580,
+            trend="uptrend",
+            rsi=48,
+            equity=10_000_000,
+            settings=_settings(),
+            risk=risk,
+            ticker="7203.T",
+        )
+        self.assertEqual(plan["action"], "buy")
+        self.assertEqual(plan["suggested_qty"] % 100, 0)
+
     def test_hold_overbought_rsi(self):
         plan = assess_edge(
             evidence=_good_evidence(),

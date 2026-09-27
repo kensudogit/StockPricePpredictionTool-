@@ -64,6 +64,10 @@ export type ProfitPlan = {
   oos_sharpe?: number;
   direction_hit_rate?: number;
   suggested_qty?: number;
+  hit_z?: number;
+  lot?: number;
+  index_trend?: string;
+  mom_return?: number;
   note?: string;
 };
 

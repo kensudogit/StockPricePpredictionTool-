@@ -24,6 +24,7 @@ MODULES = [
     "app.analysis.fundamental",
     "app.analysis.news",
     "app.analysis.evidence",
+    "app.analysis.session",
     "app.trading.gate",
     "app.trading.edge",
     "app.trading.expectancy",

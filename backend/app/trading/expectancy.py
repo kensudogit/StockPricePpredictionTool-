@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analysis.session import lot_size_for, round_to_lot
+
 
 def kelly_fraction(
     hit_rate: float,
@@ -86,6 +88,7 @@ def allocate_book(
     max_position_pct: float,
     stop_loss_pct: float,
     open_tickers: set[str] | None = None,
+    lot_size: int = 100,
 ) -> dict[str, Any]:
     """Concentrate daily risk on the highest OOS EV×Sharpe×move names."""
     held = open_tickers or set()
@@ -120,6 +123,10 @@ def allocate_book(
             qty = min(qty, suggested)
         if price > 0 and max_position_pct > 0:
             qty = min(qty, (equity * max_position_pct) / price)
+        lot = lot_size_for(str(row.get("ticker") or ""), lot_size)
+        qty = round_to_lot(qty, lot)
+        if qty < lot:
+            continue
         ev = float(plan.get("expected_value") or 0.0)
         yen = expected_yen(qty, price, ev)
         picks.append(
@@ -129,6 +136,7 @@ def allocate_book(
                 "score": round(score, 8),
                 "weight": round(weight, 4),
                 "quantity": round(max(0.0, qty), 4),
+                "lot": lot,
                 "last_close": price,
                 "expected_value": ev,
                 "expected_yen": round(yen, 2),

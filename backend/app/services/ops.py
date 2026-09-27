@@ -9,7 +9,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.analysis.evidence import build_ols_evidence
+from app.analysis.evidence import build_robust_evidence
+from app.analysis.session import close_trend, drop_incomplete_tokyo_session, momentum_return
 from app.analysis.technical import latest_snapshot
 from app.config import get_settings
 from app.models import Order, PortfolioSnapshot, Position, Symbol
@@ -50,12 +51,21 @@ class OpsService:
         ).all()
         return {r[0] for r in rows}
 
-    async def scan_ticker(self, ticker: str) -> dict[str, Any]:
+    async def index_regime(self) -> str:
+        ticker = self.settings.index_ticker
+        try:
+            await self.ingestion.ingest_bars(ticker, timeframe="1d", limit=80)
+        except Exception:  # noqa: BLE001
+            return "unknown"
+        df = drop_incomplete_tokyo_session(await load_bars_df(self.db, ticker, limit=80))
+        return close_trend(df)
+
+    async def scan_ticker(self, ticker: str, *, index_trend: str = "unknown") -> dict[str, Any]:
         try:
             await self.ingestion.ingest_bars(ticker, timeframe="1d", limit=220)
         except Exception as e:  # noqa: BLE001
             return {"ticker": ticker, "ok": False, "error": str(e)}
-        df = await load_bars_df(self.db, ticker, limit=250)
+        df = drop_incomplete_tokyo_session(await load_bars_df(self.db, ticker, limit=250))
         if df.empty or len(df) < 40:
             return {"ticker": ticker, "ok": False, "error": "insufficient bars"}
         pred = await PredictionService(self.db).predict(ticker)
@@ -63,11 +73,15 @@ class OpsService:
             return {"ticker": ticker, "ok": False, "error": "prediction failed"}
         tech = latest_snapshot(df)
         equity, _ = await self.orders.book_equity()
-        evidence = pred.evidence or build_ols_evidence(
+        cost_bps = float(self.settings.paper_fee_bps) + float(self.settings.spread_bps)
+        evidence = pred.evidence or build_robust_evidence(
             df,
             min_hit_rate=self.settings.min_oos_hit_rate,
             min_samples=self.settings.min_oos_samples,
-            fee_bps=self.settings.paper_fee_bps,
+            fee_bps=cost_bps,
+            long_points=self.settings.oos_confirm_points,
+            min_expected_value=self.settings.min_expected_value,
+            min_hit_z=self.settings.min_hit_z,
         )
         plan = assess_edge(
             evidence=evidence,
@@ -78,6 +92,9 @@ class OpsService:
             rsi=tech.get("rsi_14"),
             equity=equity,
             risk=self.risk,
+            ticker=ticker,
+            index_trend=index_trend,
+            mom_return=momentum_return(df),
         )
         return {
             "ticker": ticker,
@@ -90,9 +107,10 @@ class OpsService:
 
     async def scan_watchlist(self, tickers: list[str] | None = None) -> dict[str, Any]:
         names = tickers or self.settings.watchlist_tickers
+        regime = await self.index_regime()
         rows = []
         for t in names[:12]:
-            rows.append(await self.scan_ticker(t))
+            rows.append(await self.scan_ticker(t, index_trend=regime))
         actionable = [r for r in rows if r.get("ok") and r.get("action") in {"buy", "sell"}]
         equity, _ = await self.orders.book_equity()
         allocation = allocate_book(
@@ -103,12 +121,14 @@ class OpsService:
             max_position_pct=self.settings.max_position_pct,
             stop_loss_pct=self.settings.default_stop_loss_pct,
             open_tickers=await self.open_tickers(),
+            lot_size=self.settings.jp_lot_size,
         )
         return {
             "tickers": names,
             "scanned": len(rows),
             "actionable": actionable,
             "allocation": allocation,
+            "index_trend": regime,
             "skipped": [r for r in rows if not r.get("ok") or r.get("action") == "hold"],
             "as_of": datetime.now(timezone.utc).isoformat(),
         }

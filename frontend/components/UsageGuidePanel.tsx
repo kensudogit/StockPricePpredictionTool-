@@ -54,7 +54,7 @@ const readinessScores = [
 
 const readinessDo = [
   "期待配分の上位だけに張る。通過銘柄を全部買わない",
-  "利益関門を通過しない銘柄は見送る（それが正しい）",
+  "60日と120日の両方でEVが残らない銘柄は見送る（それが正しい）",
   "WATCHLIST で見る銘柄を固定する（既定: 7203/6758/9984/8306/6501）",
   "mode: paper で通してから、Alpaca live を検討する",
 ] as const;

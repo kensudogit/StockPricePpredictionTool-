@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 from app.analysis.accuracy import evaluate_walk_forward
-from app.analysis.evidence import build_ols_evidence, summarize_walk_forward
+from app.analysis.evidence import build_ols_evidence, merge_robust_evidence, summarize_walk_forward
+from app.analysis.session import drop_incomplete_tokyo_session, lot_size_for, round_to_lot
 from app.backtest.engine import BacktestService, run_ols_signal_backtest
 from app.config import Settings
 from app.ml.ensemble import MLEnsembleService, evaluate_ml_ridge_walk_forward
@@ -41,6 +42,30 @@ class TestEvidence(unittest.TestCase):
         ev = build_ols_evidence(_ohlcv(120), min_samples=5, min_hit_rate=0.0)
         self.assertGreaterEqual(ev["n_samples"], 5)
         self.assertIn("direction_hit_rate", ev)
+        self.assertIn("hit_z", ev)
+
+    def test_merge_robust_rejects_weak_long_window(self):
+        short = {
+            "ok": True,
+            "direction_hit_rate": 0.57,
+            "expected_value": 0.002,
+            "oos_sharpe": 0.8,
+            "oos_strategy_return": 0.05,
+            "hit_z": 1.1,
+            "n_samples": 60,
+        }
+        long = {
+            "ok": True,
+            "direction_hit_rate": 0.51,
+            "expected_value": 0.0002,
+            "oos_sharpe": 0.1,
+            "oos_strategy_return": -0.02,
+            "hit_z": 0.2,
+            "n_samples": 120,
+        }
+        merged = merge_robust_evidence(short, long, min_expected_value=0.0008, min_hit_z=1.0)
+        self.assertFalse(merged["ok"])
+        self.assertIn("long", merged["block_reason"] or "")
 
     def test_ols_signal_backtest_strategy(self):
         out = run_ols_signal_backtest(_ohlcv(100), fee_bps=5)
@@ -62,6 +87,29 @@ class TestEvidence(unittest.TestCase):
         oos = evaluate_ml_ridge_walk_forward(_ohlcv(130), min_train=50, max_points=20)
         self.assertGreater(oos.get("n_samples", 0), 5)
         self.assertIn("direction_hit_rate", oos["metrics"])
+
+
+class TestSessionLots(unittest.TestCase):
+    def test_jp_lot_and_round(self):
+        self.assertEqual(lot_size_for("7203.T"), 100)
+        self.assertEqual(lot_size_for("AAPL"), 1)
+        self.assertEqual(round_to_lot(250, 100), 200)
+        self.assertEqual(round_to_lot(99, 100), 0)
+
+    def test_drop_incomplete_before_close(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        jst = ZoneInfo("Asia/Tokyo")
+        now = datetime(2026, 9, 28, 10, 0, tzinfo=jst)
+        df = pd.DataFrame(
+            {
+                "ts": pd.to_datetime(["2026-09-25", "2026-09-28"], utc=True),
+                "close": [100.0, 101.0],
+            }
+        )
+        out = drop_incomplete_tokyo_session(df, now=now)
+        self.assertEqual(len(out), 1)
 
 
 class TestTradingGate(unittest.TestCase):

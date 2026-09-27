@@ -485,31 +485,24 @@ async def trading_readiness():
 @router.get("/trading/plan/{ticker}")
 async def trading_plan(ticker: str, db: AsyncSession = Depends(get_db)):
     """Cost-aware profit plan for a ticker (no order)."""
-    from app.analysis.evidence import build_ols_evidence
+    from app.analysis.session import drop_incomplete_tokyo_session, momentum_return
     from app.analysis.technical import latest_snapshot
-    from app.config import get_settings
     from app.risk.manager import EnhancedRiskManager
+    from app.services.ops import OpsService
     from app.services.prediction import PredictionService
     from app.services.trading import OrderService
     from app.trading.edge import assess_edge
 
-    df = await _ensure_bars(db, ticker, min_rows=50, limit=250)
+    df = drop_incomplete_tokyo_session(await _ensure_bars(db, ticker, min_rows=50, limit=250))
     if df.empty or len(df) < 40:
         raise HTTPException(400, "Need more bars. Run データ取込 first.")
-    settings = get_settings()
     pred = await PredictionService(db).predict(ticker)
     if not pred:
         raise HTTPException(400, "Prediction failed")
     tech = latest_snapshot(df)
     equity, _ = await OrderService(db).book_equity()
-    evidence = pred.evidence or build_ols_evidence(
-        df,
-        min_hit_rate=settings.min_oos_hit_rate,
-        min_samples=settings.min_oos_samples,
-        fee_bps=settings.paper_fee_bps,
-    )
     plan = assess_edge(
-        evidence=evidence,
+        evidence=pred.evidence,
         direction=pred.direction,
         last_close=float(tech.get("close") or df.iloc[-1]["close"]),
         predicted_price=float(pred.predicted_price),
@@ -517,6 +510,9 @@ async def trading_plan(ticker: str, db: AsyncSession = Depends(get_db)):
         rsi=tech.get("rsi_14"),
         equity=equity,
         risk=EnhancedRiskManager(db),
+        ticker=ticker,
+        index_trend=await OpsService(db).index_regime(),
+        mom_return=momentum_return(df),
     )
     return {
         "ticker": ticker,
@@ -529,31 +525,24 @@ async def trading_plan(ticker: str, db: AsyncSession = Depends(get_db)):
 
 
 async def _edge_plan(db: AsyncSession, ticker: str):
-    from app.analysis.evidence import build_ols_evidence
+    from app.analysis.session import drop_incomplete_tokyo_session, momentum_return
     from app.analysis.technical import latest_snapshot
-    from app.config import get_settings
     from app.risk.manager import EnhancedRiskManager
+    from app.services.ops import OpsService
     from app.services.prediction import PredictionService
     from app.services.trading import OrderService
     from app.trading.edge import assess_edge
 
-    df = await _ensure_bars(db, ticker, min_rows=50, limit=250)
+    df = drop_incomplete_tokyo_session(await _ensure_bars(db, ticker, min_rows=50, limit=250))
     if df.empty or len(df) < 40:
         return None, None
-    settings = get_settings()
     pred = await PredictionService(db).predict(ticker)
     if not pred:
         return None, None
     tech = latest_snapshot(df)
     equity, _ = await OrderService(db).book_equity()
-    evidence = pred.evidence or build_ols_evidence(
-        df,
-        min_hit_rate=settings.min_oos_hit_rate,
-        min_samples=settings.min_oos_samples,
-        fee_bps=settings.paper_fee_bps,
-    )
     plan = assess_edge(
-        evidence=evidence,
+        evidence=pred.evidence,
         direction=pred.direction,
         last_close=float(tech.get("close") or df.iloc[-1]["close"]),
         predicted_price=float(pred.predicted_price),
@@ -561,6 +550,9 @@ async def _edge_plan(db: AsyncSession, ticker: str):
         rsi=tech.get("rsi_14"),
         equity=equity,
         risk=EnhancedRiskManager(db),
+        ticker=ticker,
+        index_trend=await OpsService(db).index_regime(),
+        mom_return=momentum_return(df),
     )
     return plan, float(tech.get("close") or df.iloc[-1]["close"])
 
