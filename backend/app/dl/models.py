@@ -201,11 +201,16 @@ class DeepLearningService:
             return {"error": f"unknown model {model}"}
         try:
             if backend == "tensorflow":
-                return _train_tf("lstm" if model in {"transformer", "tft"} else model, close, epochs=epochs)
-            return _train_torch(model, close, epochs=epochs)
+                out = _train_tf("lstm" if model in {"transformer", "tft"} else model, close, epochs=epochs)
+            else:
+                out = _train_torch(model, close, epochs=epochs)
         except ImportError:
-            return _numpy_fallback(close)
+            out = _numpy_fallback(close)
         except Exception as e:
-            fb = _numpy_fallback(close)
-            fb["warning"] = str(e)
-            return fb
+            out = _numpy_fallback(close)
+            out["warning"] = str(e)
+        if isinstance(out, dict) and "error" not in out:
+            out["confidence_kind"] = "in_sample"
+            out["evidence_ok"] = False
+            out["note"] = "DL is refit in-sample each request. Do not use as live evidence."
+        return out

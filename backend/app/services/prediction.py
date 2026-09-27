@@ -22,6 +22,9 @@ class PredictionResult:
     confidence: float
     model_name: str
     horizon: str
+    evidence_ok: bool = False
+    oos_hit_rate: float | None = None
+    evidence: dict | None = None
 
 
 def _build_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -115,6 +118,19 @@ class PredictionService:
         pred_price = _ols_predict(Xn, y_price_train, xl)
         direction, confidence = _dir_confidence(Xn, y_dir_train, xl)
 
+        from app.analysis.evidence import build_ols_evidence
+        from app.config import get_settings
+
+        settings = get_settings()
+        evidence = build_ols_evidence(
+            df,
+            min_hit_rate=settings.min_oos_hit_rate,
+            min_samples=settings.min_oos_samples,
+            fee_bps=settings.paper_fee_bps,
+        )
+        evidence_ok = bool(evidence.get("ok"))
+        oos_hit = evidence.get("direction_hit_rate")
+
         result = await self.db.execute(select(Symbol).where(Symbol.ticker == ticker))
         symbol = result.scalar_one()
         rec = Prediction(
@@ -126,7 +142,11 @@ class PredictionService:
             direction=direction,
             confidence=Decimal(str(round(confidence, 4))),
             features={c: float(X_last[i]) for i, c in enumerate(feature_cols)},
-            meta={"train_rows": int(len(X_train))},
+            meta={
+                "train_rows": int(len(X_train)),
+                "confidence_kind": "in_sample_linear",
+                "evidence": evidence,
+            },
         )
         self.db.add(rec)
         await self.db.commit()
@@ -139,4 +159,7 @@ class PredictionService:
             confidence=confidence,
             model_name="ridge_ols_v1",
             horizon=horizon,
+            evidence_ok=evidence_ok,
+            oos_hit_rate=None if oos_hit is None else float(oos_hit),
+            evidence=evidence,
         )

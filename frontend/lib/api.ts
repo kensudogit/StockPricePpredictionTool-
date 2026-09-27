@@ -29,6 +29,97 @@ export type Health = {
   environment: string;
   trading_mode: string;
   providers: { name: string; available: boolean }[];
+  live_trading_allowed?: boolean;
+  live_venue?: string;
+  paper_fee_bps?: number;
+};
+
+export type TradingReadiness = {
+  trading_mode: string;
+  broker_name: string;
+  live_venue: string;
+  live_trading_allowed: boolean;
+  confirm_set: boolean;
+  paper_fee_bps: number;
+  min_oos_hit_rate: number;
+  min_oos_samples: number;
+  can_place_default: boolean;
+  place_reason: string;
+  evidence_ok: boolean;
+  implemented_live: string[];
+  stub_brokers: string[];
+};
+
+export type ProfitPlan = {
+  ok: boolean;
+  action: string;
+  reasons?: string[];
+  block_reason?: string | null;
+  predicted_return?: number;
+  expected_value?: number;
+  expected_yen?: number;
+  profit_score?: number;
+  kelly_fraction?: number;
+  oos_strategy_return?: number;
+  oos_sharpe?: number;
+  direction_hit_rate?: number;
+  suggested_qty?: number;
+  note?: string;
+};
+
+export type AllocationPick = {
+  ticker: string;
+  action: string;
+  score?: number;
+  weight?: number;
+  quantity?: number;
+  last_close?: number;
+  expected_value?: number;
+  expected_yen?: number;
+  oos_sharpe?: number;
+  plan?: ProfitPlan;
+};
+
+export type AllocationBook = {
+  picks: AllocationPick[];
+  skipped_open?: string[];
+  candidates?: number;
+  expected_portfolio_yen?: number;
+  daily_risk_budget?: number;
+  note?: string;
+};
+
+export type ExpectancyReport = {
+  starting_equity: number;
+  equity: number;
+  equity_delta: number;
+  equity_return: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  n_filled_orders: number;
+  expectancy_per_fill: number;
+  note?: string;
+};
+
+export type OrderPreview = {
+  dry_run: boolean;
+  decision: string;
+  ok: boolean;
+  ticker: string;
+  side: string;
+  quantity: number;
+  ref_price: number;
+  expected_fill_price: number;
+  notional: number;
+  equity: number;
+  mode: string;
+  broker: string;
+  gate_ok: boolean;
+  gate_reason: string;
+  risk_ok: boolean;
+  risk_reason: string;
+  fee_bps: number;
+  edge?: ProfitPlan;
 };
 
 export type Symbol = {
@@ -216,6 +307,7 @@ export type PipelineResult = {
   status?: string;
   stages: Record<string, unknown>;
   error?: string;
+  dry_run?: boolean;
 };
 
 export type ExplanationFeature = {
@@ -241,7 +333,15 @@ export type InsightResult = {
     ml_predicted_price?: number | null;
     ml_predicted_return?: number | null;
   };
-  confidence: { value: number; label: string; note?: string };
+  confidence: { value: number; label: string; note?: string; kind?: string };
+  edge?: ProfitPlan;
+  evidence?: {
+    ok?: boolean;
+    direction_hit_rate?: number;
+    n_samples?: number;
+    oos_strategy_return?: number;
+    block_reason?: string | null;
+  };
   signal: {
     action: string;
     label: string;
@@ -310,10 +410,10 @@ export const api = {
   sns: () => request<SnsPost[]>("/sns/posts"),
   ingest: (ticker: string) =>
     request("/ingest/bars", { method: "POST", body: JSON.stringify({ ticker, timeframe: "1d", limit: 120 }) }),
-  runPipeline: (ticker: string, quantity = 100) =>
+  runPipeline: (ticker: string, quantity = 100, dryRun = false) =>
     request<PipelineResult>("/pipeline/run", {
       method: "POST",
-      body: JSON.stringify({ ticker, quantity }),
+      body: JSON.stringify({ ticker, quantity, dry_run: dryRun }),
     }),
   technical: (ticker: string) => request<TechnicalResponse>(`/technical/${encodeURIComponent(ticker)}`),
   fundamentalsIngest: (ticker: string) =>
@@ -329,11 +429,43 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ticker, model, backend: "pytorch", epochs: 8 }),
     }),
-  backtest: (ticker: string, engine = "pandas") =>
+  backtest: (ticker: string, engine = "pandas", strategy = "ols_signal") =>
     request<BacktestResult>("/backtest/run", {
       method: "POST",
-      body: JSON.stringify({ ticker, engine, fast: 10, slow: 30 }),
+      body: JSON.stringify({ ticker, engine, strategy, fast: 10, slow: 30 }),
     }),
+  tradingReadiness: () => request<TradingReadiness>("/trading/readiness"),
+  tradingPlan: (ticker: string) =>
+    request<{ ticker: string; plan: ProfitPlan; last_close?: number; predicted_price?: number }>(
+      `/trading/plan/${encodeURIComponent(ticker)}`,
+    ),
+  watchlist: () => request<{ tickers: string[]; daily_auto_execute: boolean }>("/watchlist"),
+  scanWatchlist: () =>
+    request<{
+      tickers: string[];
+      scanned: number;
+      actionable: { ticker: string; action: string; plan?: ProfitPlan; last_close?: number }[];
+      allocation?: AllocationBook;
+      skipped: { ticker: string; action?: string; error?: string }[];
+    }>("/trading/scan", { method: "POST" }),
+  allocateWatchlist: () =>
+    request<{ allocation: AllocationBook; scanned: number; actionable: unknown[] }>("/trading/allocate", {
+      method: "POST",
+    }),
+  tradingExpectancy: () => request<ExpectancyReport>("/trading/expectancy"),
+  opsMark: () => request<{ marks: unknown[]; exits: unknown[]; positions: number }>("/ops/mark", { method: "POST" }),
+  opsDaily: (execute = false) =>
+    request<Record<string, unknown>>(`/ops/daily${execute ? "?execute=true" : "?execute=false"}`, {
+      method: "POST",
+    }),
+  evaluateOrder: (body: {
+    ticker: string;
+    side: "buy" | "sell";
+    quantity: number;
+    broker?: string;
+    order_type?: string;
+    limit_price?: number;
+  }) => request<OrderPreview>("/trading/evaluate", { method: "POST", body: JSON.stringify(body) }),
   accuracy: (ticker: string) =>
     request<AccuracyResult>("/accuracy/evaluate", {
       method: "POST",

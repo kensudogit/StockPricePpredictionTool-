@@ -15,6 +15,10 @@ import {
   type Health,
   type InsightResult,
   type IntegratedAnalysis,
+  type AllocationBook,
+  type AllocationPick,
+  type ExpectancyReport,
+  type ProfitPlan,
   type NewsItem,
   type Order,
   type PipelineResult,
@@ -71,6 +75,10 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [ragAnswer, setRagAnswer] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [profitPlan, setProfitPlan] = useState<ProfitPlan | null>(null);
+  const [scanHits, setScanHits] = useState<AllocationPick[]>([]);
+  const [allocation, setAllocation] = useState<AllocationBook | null>(null);
+  const [expectancy, setExpectancy] = useState<ExpectancyReport | null>(null);
 
   const refresh = useCallback(async (selected = ticker) => {
     const settled = await Promise.allSettled([
@@ -119,6 +127,17 @@ export default function DashboardPage() {
       setFundamentals(await api.fundamentals(selected));
     } catch {
       setFundamentals(null);
+    }
+    try {
+      const planRes = await api.tradingPlan(selected);
+      setProfitPlan(planRes.plan);
+    } catch {
+      /* plan is optional on refresh */
+    }
+    try {
+      setExpectancy(await api.tradingExpectancy());
+    } catch {
+      /* ledger optional */
     }
 
     return { softError, techOk, failedCount: failed.length };
@@ -197,6 +216,9 @@ export default function DashboardPage() {
             API {health?.status ?? "…"}
           </div>
           <div className={styles.pill}>mode: {health?.trading_mode ?? "—"}</div>
+          <div className={styles.pill}>
+            live: {health?.live_trading_allowed ? health.live_venue : health?.live_venue ?? "paper"}
+          </div>
         </div>
       </header>
 
@@ -312,6 +334,98 @@ export default function DashboardPage() {
           className={styles.btnGhost}
           disabled={busy}
           onClick={() =>
+            run("利益計画", async () => {
+              const res = await api.tradingPlan(ticker);
+              setProfitPlan(res.plan);
+              return res.plan.ok
+                ? `利益関門通過: ${res.plan.action} · 推奨 ${res.plan.suggested_qty ?? 0}株`
+                : `見送り: ${res.plan.block_reason ?? "edge not ok"}`;
+            })
+          }
+        >
+          利益計画
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("ウォッチリストスキャン", async () => {
+              const res = await api.scanWatchlist();
+              if (res.allocation) setAllocation(res.allocation);
+              setScanHits(res.allocation?.picks?.length ? res.allocation.picks : res.actionable);
+              const yen = res.allocation?.expected_portfolio_yen ?? 0;
+              return `スキャン ${res.scanned} · 配分 ${res.allocation?.picks?.length ?? 0} 銘柄 · 期待 ${Math.round(yen).toLocaleString()}円`;
+            })
+          }
+        >
+          本日の候補
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("期待配分", async () => {
+              const res = await api.allocateWatchlist();
+              setAllocation(res.allocation);
+              setScanHits(res.allocation?.picks ?? []);
+              const yen = res.allocation?.expected_portfolio_yen ?? 0;
+              return `上位 ${res.allocation?.picks?.length ?? 0} 銘柄 · 期待 ${Math.round(yen).toLocaleString()}円`;
+            })
+          }
+        >
+          期待配分
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("実現損益", async () => {
+              const res = await api.tradingExpectancy();
+              setExpectancy(res);
+              return `実現 ${Math.round(res.realized_pnl).toLocaleString()}円 · 1約定あたり ${Math.round(res.expectancy_per_fill).toLocaleString()}円`;
+            })
+          }
+        >
+          実現損益
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("値洗い・損切り", async () => {
+              const res = await api.opsMark();
+              return `建玉 ${res.positions} · 決済 ${res.exits.length} 件`;
+            })
+          }
+        >
+          値洗い
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("日次運用（評価のみ）", async () => {
+              const res = await api.opsDaily(false);
+              const scan = res.scan as {
+                scanned?: number;
+                allocation?: AllocationBook;
+                actionable?: AllocationPick[];
+              } | undefined;
+              if (scan?.allocation) setAllocation(scan.allocation);
+              if (scan?.allocation?.picks?.length) setScanHits(scan.allocation.picks);
+              else if (scan?.actionable) setScanHits(scan.actionable);
+              if (res.expectancy) setExpectancy(res.expectancy as ExpectancyReport);
+              const yen = scan?.allocation?.expected_portfolio_yen ?? 0;
+              return `日次評価: スキャン ${scan?.scanned ?? 0} · 配分 ${scan?.allocation?.picks?.length ?? 0} · 期待 ${Math.round(yen).toLocaleString()}円`;
+            })
+          }
+        >
+          日次評価
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
             run("統合分析", async () => {
               const res = await api.integrated(ticker, true);
               setIntegrated(res);
@@ -379,6 +493,17 @@ export default function DashboardPage() {
           className={styles.btnGhost}
           disabled={busy}
           onClick={() =>
+            run("パイプライン評価", async () => {
+              setPipeline(await api.runPipeline(ticker, 100, true));
+            })
+          }
+        >
+          パイプライン評価
+        </button>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
             run("パイプライン完了", async () => {
               setPipeline(await api.runPipeline(ticker));
             })
@@ -389,6 +514,39 @@ export default function DashboardPage() {
       </section>
 
       {(message || error) && <p className={error ? styles.error : styles.message}>{error || message}</p>}
+
+      {(allocation || expectancy) && (
+        <p className={styles.message}>
+          {allocation
+            ? `配分期待値 ${Math.round(allocation.expected_portfolio_yen ?? 0).toLocaleString()}円 · リスク予算 ${Math.round(allocation.daily_risk_budget ?? 0).toLocaleString()}円`
+            : ""}
+          {allocation && expectancy ? " · " : ""}
+          {expectancy
+            ? `実現 ${Math.round(expectancy.realized_pnl).toLocaleString()}円（資本 ${((expectancy.equity_return || 0) * 100).toFixed(2)}%）`
+            : ""}
+        </p>
+      )}
+
+      {scanHits.length > 0 && (
+        <p className={styles.message}>
+          期待配分:{" "}
+          {scanHits.map((h) => (
+            <button
+              key={h.ticker}
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => {
+                setTicker(h.ticker);
+                setProfitPlan(h.plan ?? null);
+              }}
+            >
+              {h.ticker} {h.action}
+              {h.expected_yen != null ? ` ${Math.round(h.expected_yen).toLocaleString()}円` : ""}
+              {h.quantity ? ` ×${Math.floor(h.quantity)}` : ""}
+            </button>
+          ))}
+        </p>
+      )}
 
       <AnalysisCharts
         technical={technical}
@@ -415,9 +573,24 @@ export default function DashboardPage() {
           technical?.snapshot?.close != null ? Number(technical.snapshot.close) : null
         }
         mode={health?.trading_mode}
+        liveAllowed={Boolean(health?.live_trading_allowed)}
+        liveVenue={health?.live_venue}
+        feeBps={health?.paper_fee_bps}
         brokers={brokers}
         positions={positions}
         busy={busy}
+        plan={profitPlan ?? insight?.edge}
+        onEvaluate={async ({ side, quantity, broker, orderType, limitPrice }) => {
+          const preview = await api.evaluateOrder({
+            ticker,
+            side,
+            quantity,
+            broker,
+            order_type: orderType,
+            limit_price: limitPrice,
+          });
+          return preview;
+        }}
         onSubmit={async ({ side, quantity, broker, orderType, limitPrice }) => {
           await run(
             side === "buy" ? "買い注文" : "売り注文",

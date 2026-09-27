@@ -85,6 +85,25 @@ class Settings(BaseSettings):
     # Trading / brokers
     trading_mode: str = "paper"
     broker_name: str = "paper"
+    live_trading_confirm: str = ""  # live only: I_UNDERSTAND_LIVE_RISK
+    paper_fee_bps: float = 5.0
+    min_oos_hit_rate: float = 0.52
+    min_oos_samples: int = 20
+    starting_equity: float = 10_000_000
+    min_oos_sharpe: float = 0.25
+    min_expected_value: float = 0.0008  # 8 bps after fees
+    require_positive_oos_return: bool = True
+    require_trend_align: bool = True
+    risk_per_trade_pct: float = 0.01
+    rsi_overbought: float = 75.0
+    rsi_oversold: float = 25.0
+    trade_cooldown_seconds: int = 3600
+    watchlist: str = "7203.T,6758.T,9984.T,8306.T,6501.T"
+    daily_auto_execute: bool = False
+    max_new_trades_per_day: int = 3
+    kelly_fraction: float = 0.25
+    trail_stop_pct: float = 0.02
+    lock_profit_r: float = 1.0
     broker_api_key: str = ""
     broker_api_secret: str = ""
     broker_base_url: str = ""
@@ -125,6 +144,10 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return to_sync_database_url(v)
         return v
+
+    @property
+    def watchlist_tickers(self) -> list[str]:
+        return [t.strip() for t in self.watchlist.split(",") if t.strip()]
 
     @property
     def cors_origins(self) -> list[str]:

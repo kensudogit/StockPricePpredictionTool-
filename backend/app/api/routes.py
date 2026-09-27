@@ -50,11 +50,16 @@ async def health(db: AsyncSession = Depends(get_db)):
         providers = await ingestion.provider_status()
     except Exception:  # noqa: BLE001
         pass
+    from app.trading.gate import live_trading_allowed, live_venue
+
     return HealthResponse(
         status="ok",
         environment=settings.environment,
         trading_mode=settings.trading_mode,
         providers=providers,
+        live_trading_allowed=live_trading_allowed(settings),
+        live_venue=live_venue(settings),
+        paper_fee_bps=settings.paper_fee_bps,
     )
 
 
@@ -165,8 +170,10 @@ async def list_predictions(limit: int = 50, db: AsyncSession = Depends(get_db)):
 @router.post("/pipeline/run", response_model=PipelineResponse)
 async def run_pipeline(body: PipelineRequest, db: AsyncSession = Depends(get_db)):
     pipeline = TradingAgentPipeline(db)
-    result = await pipeline.run(body.ticker, quantity=body.quantity)
-    return PipelineResponse(**result)
+    result = await pipeline.run(
+        body.ticker, quantity=body.quantity, dry_run=body.dry_run, auto_size=body.auto_size
+    )
+    return PipelineResponse(**{k: result[k] for k in ("ticker", "status", "stages", "error", "dry_run") if k in result})
 
 
 @router.get("/signals", response_model=list[SignalOut])

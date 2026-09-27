@@ -13,4 +13,17 @@ describe("manual trade order body", () => {
     expect(body.quantity).toBeGreaterThan(0);
     expect(body.broker).toBe("paper");
   });
+
+  it("evaluate payload is dry-run shaped", () => {
+    const preview = {
+      dry_run: true,
+      decision: "ready",
+      ok: true,
+      ticker: "7203.T",
+      side: "buy",
+      quantity: 100,
+    };
+    expect(preview.dry_run).toBe(true);
+    expect(preview.decision).toBe("ready");
+  });
 });

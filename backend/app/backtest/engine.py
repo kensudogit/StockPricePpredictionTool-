@@ -163,6 +163,51 @@ def run_zipline_stub(df: pd.DataFrame, **kwargs) -> dict[str, Any]:
     return out
 
 
+def run_ols_signal_backtest(
+    df: pd.DataFrame,
+    *,
+    fee_bps: float = 5.0,
+    min_train: int = 40,
+    max_points: int = 80,
+) -> dict[str, Any]:
+    """Backtest the same walk-forward OLS directions used for live signals."""
+    from app.analysis.accuracy import evaluate_walk_forward
+    from app.analysis.evidence import summarize_walk_forward
+
+    wf = evaluate_walk_forward(df, min_train=min_train, max_points=max_points)
+    ev = summarize_walk_forward(wf, fee_bps=fee_bps)
+    series = wf.get("series") or []
+    step = max(1, len(series) // 100) if series else 1
+    equity_curve = [
+        {
+            "ts": r.get("ts"),
+            "equity": r.get("model_equity"),
+            "buy_hold": r.get("buy_hold_equity"),
+        }
+        for i, r in enumerate(series)
+        if i % step == 0 or i == len(series) - 1
+    ]
+    return {
+        "engine": "pandas",
+        "strategy": "ols_walk_forward",
+        "metrics": {
+            "total_return": ev.get("oos_strategy_return"),
+            "buy_hold_return": ev.get("buy_hold_return"),
+            "sharpe": ev.get("oos_sharpe"),
+            "max_drawdown": None,
+            "win_rate": ev.get("direction_hit_rate"),
+            "trades": ev.get("n_samples"),
+            "direction_hit_rate": ev.get("direction_hit_rate"),
+            "mae": ev.get("mae"),
+            "alpha_vs_buy_hold": float(ev.get("oos_strategy_return") or 0)
+            - float(ev.get("buy_hold_return") or 0),
+        },
+        "evidence": ev,
+        "equity_curve": equity_curve,
+        "params": {"fee_bps": fee_bps, "min_train": min_train, "max_points": max_points},
+    }
+
+
 class BacktestService:
     def __init__(self, db: AsyncSession | None = None) -> None:
         self.db = db
@@ -173,14 +218,18 @@ class BacktestService:
         engine: str = "vectorbt",
         fast: int = 10,
         slow: int = 30,
+        strategy: str = "sma_crossover",
+        fee_bps: float = 5.0,
     ) -> dict[str, Any]:
+        if strategy in {"ols_signal", "ols_walk_forward", "prediction"}:
+            return run_ols_signal_backtest(df, fee_bps=fee_bps)
         engine = engine.lower()
         if engine == "backtrader":
             return run_backtrader_backtest(df, fast, slow)
         if engine == "zipline":
             return run_zipline_stub(df, fast=fast, slow=slow)
         if engine == "pandas":
-            return run_pandas_backtest(df, fast, slow)
+            return run_pandas_backtest(df, fast, slow, fee_bps=fee_bps)
         return run_vectorbt_backtest(df, fast, slow)
 
     async def run_and_store(
@@ -190,8 +239,12 @@ class BacktestService:
         engine: str = "vectorbt",
         fast: int = 10,
         slow: int = 30,
+        strategy: str = "sma_crossover",
+        fee_bps: float = 5.0,
     ) -> dict[str, Any]:
-        result = self.run(df, engine=engine, fast=fast, slow=slow)
+        result = self.run(
+            df, engine=engine, fast=fast, slow=slow, strategy=strategy, fee_bps=fee_bps
+        )
         if self.db is not None:
             rec = BacktestRun(
                 ticker=ticker,

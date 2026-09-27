@@ -93,6 +93,7 @@
   flex-wrap: wrap;
 }
 
+.evaluate,
 .buy,
 .sell {
   min-width: 8rem;
@@ -102,6 +103,21 @@
   font-weight: 700;
   font-size: 0.95rem;
   cursor: pointer;
+}
+
+.evaluate {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.evaluate:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.evaluate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .buy {

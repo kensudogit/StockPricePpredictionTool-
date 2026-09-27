@@ -31,32 +31,52 @@ API: `GET /api/v1/technical/{ticker}`
 PER / PBR / ROE / ROA / EPS / BPS / 営業利益率 / 自己資本比率  
 API: `POST /api/v1/fundamentals/ingest`, `GET /api/v1/fundamentals/{ticker}`
 
-### AI予測（ML）
-上昇率・下落率・売買判断のアンサンブル  
-API: `POST /api/v1/ml/predict`
+### AI予測（証拠付き OLS が正本）
+翌営業日価格・方向は `POST /api/v1/predict`（`ridge_ols_v1`）。  
+毎回 **walk-forward OOS**（方向的中率・手数料込み戦略リターン）を `evidence` に載せる。  
+`evidence.ok` が false ならシグナルは様子見。in-sample の confidence だけでは発注しない。
 
-### 深層学習
-LSTM / GRU / Transformer / TFT-lite（PyTorch）  
-API: `POST /api/v1/dl/predict`
+利益関門（`assess_edge` / `GET /api/v1/trading/plan/{ticker}`）は、手数料控除後の OOS 期待値・Sharpe・予測幅・トレンド一致が揃ったときだけ buy/sell する。数量はリスク予算×期待値スケールに Quarter-Kelly の上限を掛ける。利益は保証しない。
+
+期待値の寄せ方:
+
+- `POST /api/v1/trading/allocate` — ウォッチリストを EV×Sharpe×予測幅で順位付けし、日次リスク予算を上位 `MAX_NEW_TRADES_PER_DAY` 銘柄に割る
+- `GET /api/v1/trading/expectancy` — 実現損益÷約定回数（机上 EV との差を見る）
+- 値洗い時に +1R で損切りを建値へ、その後は高値（安値）から `TRAIL_STOP_PCT` で追随
+- 自動発注は配分の上位だけ（全通過銘柄には張らない）
+
+日次運用:
+
+- `GET /api/v1/watchlist` / `POST /api/v1/trading/scan` — ウォッチリストを取込→計画
+- `POST /api/v1/ops/mark` — 値洗い。損切り・利確に当たったら建玉を決済（利益関門は通さない）
+- `POST /api/v1/ops/daily` — スキャン + 値洗い。新規発注は `DAILY_AUTO_EXECUTE=true` のときだけ
+- Celery: 9:15 スキャン、16:20 日次（東京）
+- 画面: 「本日の候補」「日次評価」「値洗い」
+
+ML アンサンブル（`POST /api/v1/ml/predict`）と DL（`POST /api/v1/dl/predict`）は参考。  
+`confidence` は in-sample。OOS は `oos` / `evidence_ok`。DL はライブ証拠に使わない。
 
 ### ベクトルDB / RAG
 既定: **pgvector**（Pinecone / Weaviate / Milvus / Qdrant アダプタあり）  
 保存: 決算・IR・ニュース・チャット  
 API: `POST /api/v1/rag/ingest`, `POST /api/v1/rag/query`
 
-### 自動売買
-日本: SBI / 楽天 / auカブコム（契約後接続スタブ）  
-海外: Interactive Brokers / Alpaca  
-既定: `TRADING_MODE=paper` / `BROKER_NAME=paper`  
-API: `GET /api/v1/brokers`, `POST /api/v1/brokers/order`
+### 自動売買（関門）
+- 既定: `TRADING_MODE=paper` / `BROKER_NAME=paper`。paper は `PAPER_FEE_BPS` を約定値に乗せる。
+- 評価: `POST /api/v1/trading/evaluate`（発注しない）
+- 執行: `POST /api/v1/brokers/order` とパイプライン。どちらも `can_place` を通す。
+- live は `LIVE_TRADING_CONFIRM=I_UNDERSTAND_LIVE_RISK` + 実装済み会場（Alpaca キー）のみ。
+- SBI / 楽天 / カブコム / IBKR はスタブ。`place_order` は関門で拒否する。
+- 準備状況: `GET /api/v1/trading/readiness`、`GET /api/v1/health` の `live_venue`
 
-### バックテスト（必須）
-engines: `pandas` | `vectorbt` | `backtrader` | `zipline`(stub)  
+### バックテスト
+既定戦略: **`ols_signal`**（予測と同じ walk-forward 方向）。SMA クロスは `strategy=sma_crossover`。  
 API: `POST /api/v1/backtest/run`
 
 ### リスク管理（必須）
 損切り / 利確 / ポジションサイズ / 最大損失 / 最大保有数 / レバレッジ  
-API: `POST /api/v1/risk/position-size`, `POST /api/v1/risk/evaluate/{ticker}`
+API: `POST /api/v1/risk/position-size`, `POST /api/v1/risk/evaluate/{ticker}`  
+値洗いでトリガーしたら `POST /api/v1/ops/mark` が建玉を決済する（決済は利益関門・クールダウンを通さない）。
 
 ## クイックスタート
 
@@ -111,6 +131,8 @@ curl -X POST http://localhost:8000/api/v1/ml/predict \
 - `VECTOR_BACKEND=pgvector` — RAG バックエンド
 - `ALPACA_API_KEY` / `SBI_API_KEY` / … — 証券 API
 - `DEFAULT_STOP_LOSS_PCT` / `MAX_OPEN_POSITIONS` / `MAX_LEVERAGE` — リスク
+- `LIVE_TRADING_CONFIRM` — live のみ `I_UNDERSTAND_LIVE_RISK`
+- `PAPER_FEE_BPS` / `MIN_OOS_HIT_RATE` / `MIN_OOS_SAMPLES` — paper 手数料と予測ゲート
 
 ## ディレクトリ
 

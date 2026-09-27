@@ -61,6 +61,8 @@ class EnhancedRiskManager:
         if leverage > self.policy.max_leverage:
             await self._log("leverage_limit", "warning", f"Leverage {leverage} > max {self.policy.max_leverage}")
             return False, "Leverage limit exceeded"
+        if not opening_new:
+            return True, "ok"
         if order_notional > self.policy.max_order_notional:
             return False, "Order notional exceeds max"
         if equity > 0 and order_notional / equity > self.policy.max_position_pct:
@@ -121,7 +123,11 @@ class EnhancedRiskManager:
         return {"stop_loss": stop, "take_profit": take}
 
     async def evaluate_marks(self, symbol_id: int, last_price: float) -> list[dict]:
-        """Trigger stop/take when mark price crosses levels."""
+        """Trigger stop/take when mark price crosses levels (long and short)."""
+        pos = (
+            await self.db.execute(select(Position).where(Position.symbol_id == symbol_id))
+        ).scalar_one_or_none()
+        long_side = True if pos is None else float(pos.quantity) >= 0
         rows = (
             await self.db.execute(
                 select(RiskOrder).where(
@@ -134,10 +140,16 @@ class EnhancedRiskManager:
         for ro in rows:
             px = float(ro.trigger_price)
             hit = False
-            if ro.order_kind == "stop_loss" and last_price <= px:
-                hit = True
-            if ro.order_kind == "take_profit" and last_price >= px:
-                hit = True
+            if long_side:
+                if ro.order_kind == "stop_loss" and last_price <= px:
+                    hit = True
+                if ro.order_kind == "take_profit" and last_price >= px:
+                    hit = True
+            else:
+                if ro.order_kind == "stop_loss" and last_price >= px:
+                    hit = True
+                if ro.order_kind == "take_profit" and last_price <= px:
+                    hit = True
             if hit:
                 ro.status = "triggered"
                 ro.triggered_at = datetime.now(timezone.utc)
@@ -158,6 +170,54 @@ class EnhancedRiskManager:
         if triggered:
             await self.db.commit()
         return triggered
+
+    async def trail_stop(self, pos: Position, last_price: float) -> dict:
+        """Lock breakeven after +1R, then trail. Never widens the stop."""
+        from app.config import get_settings
+        from app.trading.expectancy import compute_trail
+
+        s = get_settings()
+        qty = float(pos.quantity)
+        avg = float(pos.avg_cost or 0)
+        cur = float(pos.stop_loss) if pos.stop_loss is not None else None
+        new_stop, reason = compute_trail(
+            quantity=qty,
+            avg_cost=avg,
+            last=last_price,
+            stop=cur,
+            sl_pct=self.policy.default_stop_loss_pct,
+            trail_pct=s.trail_stop_pct,
+            lock_r=s.lock_profit_r,
+        )
+        if new_stop is None or reason in {"hold", "flat"}:
+            return {"reason": reason, "stop": cur, "updated": False}
+        improved = False
+        if qty > 0:
+            improved = cur is None or new_stop > float(cur) + 1e-9
+        elif qty < 0:
+            improved = cur is None or new_stop < float(cur) - 1e-9
+        if not improved:
+            return {"reason": "no_improve", "stop": cur, "updated": False}
+        pos.stop_loss = Decimal(str(round(new_stop, 6)))
+        rows = (
+            await self.db.execute(
+                select(RiskOrder).where(
+                    RiskOrder.symbol_id == pos.symbol_id,
+                    RiskOrder.order_kind == "stop_loss",
+                    RiskOrder.status == "active",
+                )
+            )
+        ).scalars().all()
+        for ro in rows:
+            ro.trigger_price = pos.stop_loss
+        await self.db.commit()
+        await self._log(
+            "trail_stop",
+            "info",
+            f"stop -> {new_stop:.4f} ({reason})",
+            {"symbol_id": pos.symbol_id, "last": last_price},
+        )
+        return {"reason": reason, "stop": new_stop, "updated": True}
 
     async def _log(self, event_type: str, severity: str, message: str, details: dict | None = None) -> None:
         self.db.add(

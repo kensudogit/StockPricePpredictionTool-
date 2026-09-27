@@ -9,6 +9,9 @@ class HealthResponse(BaseModel):
     environment: str
     trading_mode: str
     providers: list[dict[str, Any]]
+    live_trading_allowed: bool = False
+    live_venue: str = "paper"
+    paper_fee_bps: float = 5.0
 
 
 class IngestRequest(BaseModel):
@@ -25,6 +28,8 @@ class PredictRequest(BaseModel):
 class PipelineRequest(BaseModel):
     ticker: str = Field(..., examples=["7203.T"])
     quantity: float = 100
+    dry_run: bool = False
+    auto_size: bool = True
 
 
 class PipelineResponse(BaseModel):
@@ -32,6 +37,7 @@ class PipelineResponse(BaseModel):
     status: Optional[str] = None
     stages: dict[str, Any] = {}
     error: Optional[str] = None
+    dry_run: bool = False
 
 
 class SymbolOut(BaseModel):

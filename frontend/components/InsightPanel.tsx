@@ -55,6 +55,8 @@ export function InsightPanel({ data }: Props) {
   const confPct = Math.round((data.confidence.value ?? 0) * 100);
   const bt = data.backtest?.metrics ?? {};
   const acc = data.accuracy ?? {};
+  const ev = data.evidence;
+  const edge = data.edge;
 
   return (
     <article className={styles.wrap}>
@@ -71,6 +73,19 @@ export function InsightPanel({ data }: Props) {
           <span className={styles.mono}>{data.signal.action.toUpperCase()}</span>
         </div>
       </header>
+      {(ev || edge) && (
+        <p className={styles.note}>
+          利益関門: {edge ? (edge.ok ? `通過 → ${edge.action}` : "見送り") : "—"}
+          {edge?.expected_value != null
+            ? ` · EV ${(edge.expected_value * 10000).toFixed(1)}bps`
+            : ""}
+          {ev?.direction_hit_rate != null
+            ? ` · OOS hit ${(ev.direction_hit_rate * 100).toFixed(1)}%`
+            : ""}
+          {edge?.suggested_qty ? ` · 推奨 ${edge.suggested_qty}株` : ""}
+          {edge?.block_reason ? ` · ${edge.block_reason}` : ev?.block_reason ? ` · ${ev.block_reason}` : ""}
+        </p>
+      )}
 
       <div className={styles.kpiGrid}>
         <div className={styles.kpi}>

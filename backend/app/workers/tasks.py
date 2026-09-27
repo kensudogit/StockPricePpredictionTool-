@@ -41,8 +41,25 @@ def run_pipeline_task(ticker: str, quantity: float = 100):
 
 
 @celery_app.task(name="app.workers.tasks.run_watchlist_pipeline")
-def run_watchlist_pipeline(tickers: list[str]):
-    results = []
-    for t in tickers:
-        results.append(run_pipeline_task(t))
-    return results
+def run_watchlist_pipeline(tickers: list[str] | None = None):
+    from app.config import get_settings
+    from app.services.ops import OpsService
+
+    names = tickers or get_settings().watchlist_tickers
+
+    async def _inner():
+        async with AsyncSessionLocal() as db:
+            return await OpsService(db).scan_watchlist(names)
+
+    return _run(_inner())
+
+
+@celery_app.task(name="app.workers.tasks.daily_ops_task")
+def daily_ops_task():
+    from app.services.ops import OpsService
+
+    async def _inner():
+        async with AsyncSessionLocal() as db:
+            return await OpsService(db).daily_run()
+
+    return _run(_inner())

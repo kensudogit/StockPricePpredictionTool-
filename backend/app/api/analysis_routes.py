@@ -62,6 +62,7 @@ class BacktestBody(BaseModel):
     engine: str = "vectorbt"  # vectorbt | backtrader | zipline | pandas
     fast: int = 10
     slow: int = 30
+    strategy: str = "ols_signal"  # ols_signal | sma_crossover
 
 
 class NewsAnalyzeBody(BaseModel):
@@ -90,6 +91,7 @@ class BrokerOrderBody(BaseModel):
     broker: str | None = None
     order_type: str = "market"
     limit_price: float | None = None
+    enforce_edge: bool = True
 
 
 class RiskSizeBody(BaseModel):
@@ -269,7 +271,17 @@ async def backtest_run(body: BacktestBody, db: AsyncSession = Depends(get_db)):
     svc = BacktestService(db)
     # Prefer pandas engine when vectorbt unavailable
     engine = body.engine
-    result = await svc.run_and_store(body.ticker, df, engine=engine, fast=body.fast, slow=body.slow)
+    from app.config import get_settings
+
+    result = await svc.run_and_store(
+        body.ticker,
+        df,
+        engine=engine,
+        fast=body.fast,
+        slow=body.slow,
+        strategy=body.strategy,
+        fee_bps=get_settings().paper_fee_bps,
+    )
     return result
 
 
@@ -414,6 +426,172 @@ async def brokers():
     return await list_broker_status()
 
 
+@router.get("/watchlist")
+async def watchlist():
+    from app.config import get_settings
+
+    s = get_settings()
+    return {"tickers": s.watchlist_tickers, "daily_auto_execute": s.daily_auto_execute}
+
+
+@router.post("/trading/scan")
+async def trading_scan(db: AsyncSession = Depends(get_db)):
+    from app.services.ops import OpsService
+
+    return await OpsService(db).scan_watchlist()
+
+
+@router.post("/ops/mark")
+async def ops_mark(db: AsyncSession = Depends(get_db)):
+    from app.services.ops import OpsService
+
+    return await OpsService(db).mark_and_exit(execute=True)
+
+
+@router.post("/ops/daily")
+async def ops_daily(execute: bool | None = None, db: AsyncSession = Depends(get_db)):
+    from app.services.ops import OpsService
+
+    return await OpsService(db).daily_run(execute=execute)
+
+
+@router.get("/trading/expectancy")
+async def trading_expectancy(db: AsyncSession = Depends(get_db)):
+    from app.services.ops import OpsService
+
+    return await OpsService(db).expectancy_report()
+
+
+@router.post("/trading/allocate")
+async def trading_allocate(db: AsyncSession = Depends(get_db)):
+    from app.services.ops import OpsService
+
+    scan = await OpsService(db).scan_watchlist()
+    return {
+        "allocation": scan.get("allocation"),
+        "scanned": scan.get("scanned"),
+        "actionable": scan.get("actionable"),
+        "as_of": scan.get("as_of"),
+    }
+
+
+@router.get("/trading/readiness")
+async def trading_readiness():
+    from app.trading.gate import readiness_report
+
+    return readiness_report()
+
+
+@router.get("/trading/plan/{ticker}")
+async def trading_plan(ticker: str, db: AsyncSession = Depends(get_db)):
+    """Cost-aware profit plan for a ticker (no order)."""
+    from app.analysis.evidence import build_ols_evidence
+    from app.analysis.technical import latest_snapshot
+    from app.config import get_settings
+    from app.risk.manager import EnhancedRiskManager
+    from app.services.prediction import PredictionService
+    from app.services.trading import OrderService
+    from app.trading.edge import assess_edge
+
+    df = await _ensure_bars(db, ticker, min_rows=50, limit=250)
+    if df.empty or len(df) < 40:
+        raise HTTPException(400, "Need more bars. Run データ取込 first.")
+    settings = get_settings()
+    pred = await PredictionService(db).predict(ticker)
+    if not pred:
+        raise HTTPException(400, "Prediction failed")
+    tech = latest_snapshot(df)
+    equity, _ = await OrderService(db).book_equity()
+    evidence = pred.evidence or build_ols_evidence(
+        df,
+        min_hit_rate=settings.min_oos_hit_rate,
+        min_samples=settings.min_oos_samples,
+        fee_bps=settings.paper_fee_bps,
+    )
+    plan = assess_edge(
+        evidence=evidence,
+        direction=pred.direction,
+        last_close=float(tech.get("close") or df.iloc[-1]["close"]),
+        predicted_price=float(pred.predicted_price),
+        trend=tech.get("trend"),
+        rsi=tech.get("rsi_14"),
+        equity=equity,
+        risk=EnhancedRiskManager(db),
+    )
+    return {
+        "ticker": ticker,
+        "direction": pred.direction,
+        "predicted_price": pred.predicted_price,
+        "last_close": tech.get("close"),
+        "evidence_ok": pred.evidence_ok,
+        "plan": plan,
+    }
+
+
+async def _edge_plan(db: AsyncSession, ticker: str):
+    from app.analysis.evidence import build_ols_evidence
+    from app.analysis.technical import latest_snapshot
+    from app.config import get_settings
+    from app.risk.manager import EnhancedRiskManager
+    from app.services.prediction import PredictionService
+    from app.services.trading import OrderService
+    from app.trading.edge import assess_edge
+
+    df = await _ensure_bars(db, ticker, min_rows=50, limit=250)
+    if df.empty or len(df) < 40:
+        return None, None
+    settings = get_settings()
+    pred = await PredictionService(db).predict(ticker)
+    if not pred:
+        return None, None
+    tech = latest_snapshot(df)
+    equity, _ = await OrderService(db).book_equity()
+    evidence = pred.evidence or build_ols_evidence(
+        df,
+        min_hit_rate=settings.min_oos_hit_rate,
+        min_samples=settings.min_oos_samples,
+        fee_bps=settings.paper_fee_bps,
+    )
+    plan = assess_edge(
+        evidence=evidence,
+        direction=pred.direction,
+        last_close=float(tech.get("close") or df.iloc[-1]["close"]),
+        predicted_price=float(pred.predicted_price),
+        trend=tech.get("trend"),
+        rsi=tech.get("rsi_14"),
+        equity=equity,
+        risk=EnhancedRiskManager(db),
+    )
+    return plan, float(tech.get("close") or df.iloc[-1]["close"])
+
+
+@router.post("/trading/evaluate")
+async def trading_evaluate(body: BrokerOrderBody, db: AsyncSession = Depends(get_db)):
+    from app.services.trading import OrderService
+
+    df = await _ensure_bars(db, body.ticker, min_rows=5, limit=30)
+    if df.empty:
+        raise HTTPException(400, "No price data. Run データ取込 first.")
+    last_price = float(df.iloc[-1]["close"])
+    out = await OrderService(db).evaluate_manual(
+        ticker=body.ticker,
+        side=body.side,
+        quantity=body.quantity,
+        price=last_price,
+        broker_name=body.broker,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
+    )
+    plan, _ = await _edge_plan(db, body.ticker)
+    if plan:
+        out["edge"] = plan
+        if body.enforce_edge and plan.get("action") != body.side.lower():
+            out["ok"] = False
+            out["decision"] = "blocked"
+            out["risk_reason"] = plan.get("block_reason") or f"edge action is {plan.get('action')}"
+    return out
+
+
 @router.post("/brokers/order")
 async def brokers_order(body: BrokerOrderBody, db: AsyncSession = Depends(get_db)):
     """Manual trade: risk-checked broker order + DB order/position update."""
@@ -436,6 +614,16 @@ async def brokers_order(body: BrokerOrderBody, db: AsyncSession = Depends(get_db
     if df.empty:
         raise HTTPException(400, "No price data. Run データ取込 first.")
     last_price = float(df.iloc[-1]["close"])
+
+    if body.enforce_edge:
+        plan, _ = await _edge_plan(db, body.ticker)
+        if plan and plan.get("action") != body.side.lower():
+            raise HTTPException(
+                400,
+                plan.get("block_reason") or f"profit gate is {plan.get('action')}, not {body.side}",
+            )
+        if plan and plan.get("suggested_qty") and body.quantity <= 0:
+            body.quantity = float(plan["suggested_qty"])
 
     result = await OrderService(db).place_manual(
         symbol_id=symbol_id,

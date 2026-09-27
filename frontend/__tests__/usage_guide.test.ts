@@ -15,8 +15,8 @@ describe("UsageGuidePanel content contract", () => {
     expect(techStack).toContain("ML · DL · RAG");
   });
 
-  it("recommended flow starts with ticker selection", () => {
-    const first = "銘柄を選択（例: 7203.T トヨタ）";
-    expect(first.includes("7203.T")).toBe(true);
+  it("recommended flow starts with EV allocation", () => {
+    const first = "「期待配分」で EV 上位だけにリスク予算を割る（全通過銘柄には張らない）";
+    expect(first.includes("期待配分")).toBe(true);
   });
 });

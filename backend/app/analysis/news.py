@@ -5,8 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import feedparser
 import httpx
+
+try:
+    import feedparser
+except ImportError:  # optional in slim local envs
+    feedparser = None  # type: ignore[assignment]
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -40,6 +44,8 @@ RSS_FEEDS: dict[str, dict[str, str]] = {
 
 
 async def fetch_rss(source: str, url: str, category: str, limit: int = 20) -> list[dict[str, Any]]:
+    if feedparser is None:
+        return []
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         resp = await client.get(url)
         resp.raise_for_status()

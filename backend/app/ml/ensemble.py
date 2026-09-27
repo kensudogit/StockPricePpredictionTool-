@@ -102,6 +102,61 @@ def _fit_predict_catboost(X_train, y_reg, y_cls, X_last) -> MLPrediction:
     return MLPrediction("catboost", pred_ret, direction, proba, signal, {})
 
 
+def evaluate_ml_ridge_walk_forward(
+    df: pd.DataFrame,
+    *,
+    min_train: int = 50,
+    max_points: int = 40,
+) -> dict[str, Any]:
+    """Expanding-window Ridge on the ensemble feature set (OOS, no GBM)."""
+    prepared = _prepare(df)
+    if len(prepared) < min_train + 5:
+        return {
+            "error": "insufficient data",
+            "have": len(prepared),
+            "n_samples": 0,
+            "metrics": {},
+        }
+    start = max(min_train, len(prepared) - max_points)
+    hits = 0
+    total = 0
+    signed: list[float] = []
+    for i in range(start, len(prepared)):
+        train = prepared.iloc[:i]
+        row = prepared.iloc[i]
+        X = train[FEATURE_COLS].to_numpy(dtype=float)
+        y = train["target_return"].to_numpy(dtype=float)
+        x_last = row[FEATURE_COLS].to_numpy(dtype=float)
+        if not np.isfinite(X).all() or not np.isfinite(x_last).all():
+            continue
+        xtx = X.T @ X + 1e-3 * np.eye(X.shape[1])
+        try:
+            beta = np.linalg.solve(xtx, X.T @ y)
+        except np.linalg.LinAlgError:
+            continue
+        pred = float(x_last @ beta)
+        actual = float(row["target_return"])
+        pred_dir = "up" if pred >= 0 else "down"
+        actual_dir = "up" if actual >= 0 else "down"
+        total += 1
+        if pred_dir == actual_dir:
+            hits += 1
+        signed.append((1.0 if pred_dir == "up" else -1.0) * actual)
+    if not total:
+        return {"error": "no evaluable points", "n_samples": 0, "metrics": {}}
+    strat = pd.Series(signed, dtype=float)
+    equity = (1 + strat).cumprod()
+    hit = hits / total
+    return {
+        "model": "ridge_on_ml_features_walk_forward",
+        "n_samples": total,
+        "metrics": {
+            "direction_hit_rate": hit,
+            "oos_strategy_return": float(equity.iloc[-1] - 1),
+        },
+    }
+
+
 class MLEnsembleService:
     MODELS = ("sklearn", "xgboost", "lightgbm", "catboost")
 
@@ -132,7 +187,25 @@ class MLEnsembleService:
                 errors[name] = str(e)
 
         if not results:
-            return {"error": "all models failed", "details": errors}
+            xtx = X_train.T @ X_train + 1e-3 * np.eye(X_train.shape[1])
+            try:
+                beta = np.linalg.solve(xtx, X_train.T @ y_reg_train)
+                pred_ret = float(X_last[0] @ beta)
+            except np.linalg.LinAlgError:
+                return {"error": "all models failed", "details": errors}
+            direction = "up" if pred_ret >= 0 else "down"
+            signal = "buy" if pred_ret > 0.002 else ("sell" if pred_ret < -0.002 else "hold")
+            results.append(
+                MLPrediction(
+                    "ridge_ml_features",
+                    pred_ret,
+                    direction,
+                    0.5,
+                    signal,
+                    {"fallback": True, "errors": errors},
+                )
+            )
+            errors["ensemble_fallback"] = "optional GBM libs missing; used numpy ridge"
 
         avg_ret = float(np.mean([r.predicted_return for r in results]))
         # upside / downside rates for reporting
@@ -142,12 +215,18 @@ class MLEnsembleService:
         for r in results:
             votes[r.signal] += 1
         consensus = max(votes, key=votes.get)
+        oos = evaluate_ml_ridge_walk_forward(df)
+        oos_hit = float((oos.get("metrics") or {}).get("direction_hit_rate") or 0.0)
         return {
             "ensemble_return": avg_ret,
             "upside_rate": upside,
             "downside_rate": downside,
             "consensus_signal": consensus,
             "votes": votes,
+            "confidence_kind": "in_sample_max_proba",
+            "oos": oos,
+            "evidence_ok": bool(oos.get("n_samples", 0) >= 20 and oos_hit >= 0.52),
+            "note": "models[].confidence is in-sample. Use oos.metrics.direction_hit_rate for evidence.",
             "models": [
                 {
                     "model": r.model,

@@ -110,7 +110,18 @@ def _signal_from_parts(
     confidence: float,
     integrated_signal: str | None,
     integrated_score: float | None,
+    evidence_ok: bool = True,
+    evidence_reason: str | None = None,
 ) -> dict[str, Any]:
+    if not evidence_ok:
+        return {
+            "action": "hold",
+            "label": "様子見",
+            "source": "oos_evidence_gate",
+            "strength": float(confidence),
+            "confidence": float(confidence),
+            "rationale": evidence_reason or "OOS evidence below threshold",
+        }
     # Prefer integrated when available; else confidence-gated direction
     if integrated_signal in {"buy", "sell", "hold"}:
         action = integrated_signal
@@ -203,10 +214,15 @@ class InsightService:
         else:
             news_summary = "ニュース統合に失敗しました。"
 
+        from app.config import get_settings
+
+        settings = get_settings()
         bt_snap: dict[str, Any] = {}
         if run_backtest and len(df) >= 50:
             try:
-                bt = BacktestService(self.db).run(df, engine="pandas", fast=10, slow=30)
+                bt = BacktestService(self.db).run(
+                    df, engine="pandas", strategy="ols_signal", fee_bps=settings.paper_fee_bps
+                )
                 m = bt.get("metrics") or {}
                 bt_snap = {
                     "engine": bt.get("engine"),
@@ -226,15 +242,49 @@ class InsightService:
 
         acc = evaluate_walk_forward(df, min_train=40, max_points=40)
         acc_metrics = acc.get("metrics") or {}
+        from app.analysis.evidence import summarize_walk_forward
+
+        evidence = summarize_walk_forward(
+            acc,
+            min_hit_rate=settings.min_oos_hit_rate,
+            min_samples=settings.min_oos_samples,
+            fee_bps=settings.paper_fee_bps,
+        )
 
         int_signal = integrated.get("signal") if isinstance(integrated, dict) else None
         int_score = integrated.get("composite_score") if isinstance(integrated, dict) else None
+        from app.risk.manager import EnhancedRiskManager
+        from app.trading.edge import assess_edge
+
+        tech_snap = {}
+        if isinstance(integrated, dict):
+            tech_snap = (integrated.get("technical") or {}).get("snapshot") or {}
+        plan = assess_edge(
+            evidence=evidence,
+            direction=ols["direction"],
+            last_close=float(ols["last_close"]),
+            predicted_price=float(ols["predicted_price"]),
+            trend=str(tech_snap.get("trend") or "") or None,
+            rsi=tech_snap.get("rsi_14"),
+            risk=EnhancedRiskManager(self.db),
+        )
         signal = _signal_from_parts(
             direction=ols["direction"],
             confidence=ols["confidence"],
-            integrated_signal=int_signal,
+            integrated_signal=plan.get("action") if not plan.get("ok") else int_signal,
             integrated_score=int_score,
+            evidence_ok=bool(plan.get("ok")),
+            evidence_reason=plan.get("block_reason"),
         )
+        if plan.get("ok") and plan.get("action") in {"buy", "sell"}:
+            signal = {
+                "action": plan["action"],
+                "label": {"buy": "買い", "sell": "売り"}.get(plan["action"], plan["action"]),
+                "source": "profit_gate",
+                "strength": float(plan.get("expected_value") or 0),
+                "confidence": ols["confidence"],
+                "suggested_qty": plan.get("suggested_qty"),
+            }
         narrative = narrative_from_explanation(
             primary_explanation, signal=signal["action"], confidence=ols["confidence"]
         )
@@ -263,8 +313,11 @@ class InsightService:
                     if ols["confidence"] >= 0.7
                     else ("中" if ols["confidence"] >= 0.55 else "低")
                 ),
-                "note": "方向予測の確信度（OLS）。0.55未満は様子見ゲート。",
+                "note": "in-sample OLS。売買は OOS hit rate（evidence）でゲートする。",
+                "kind": "in_sample_linear",
             },
+            "evidence": evidence,
+            "edge": plan,
             "signal": signal,
             "explanation": primary_explanation,
             "explanation_ml": ml.get("explanation") if isinstance(ml, dict) else None,
