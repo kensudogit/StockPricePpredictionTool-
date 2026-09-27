@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatBlockReason } from "@/lib/gate";
 import type { OrderPreview, Position, ProfitPlan } from "@/lib/api";
 import styles from "./trade.module.css";
 
@@ -150,7 +151,7 @@ export function TradePanel({
           {plan.hit_z != null ? ` · z ${plan.hit_z.toFixed(2)}` : ""}
           {plan.lot ? ` · 単元 ${plan.lot}` : ""}
           {plan.suggested_qty ? ` · 推奨 ${plan.suggested_qty}株` : ""}
-          {plan.block_reason ? ` · ${plan.block_reason}` : ""}
+          {plan.block_reason ? ` · ${formatBlockReason(plan.block_reason)}` : ""}
           {plan.suggested_qty ? (
             <>
               {" "}
@@ -180,7 +181,7 @@ export function TradePanel({
         <p className={styles.notional}>
           評価: {preview.decision} · 見込み {preview.expected_fill_price.toFixed(2)} · 関門{" "}
           {preview.gate_ok ? "通過" : preview.gate_reason} · リスク{" "}
-          {preview.risk_ok ? "OK" : preview.risk_reason}
+          {preview.risk_ok ? "OK" : formatBlockReason(preview.risk_reason)}
         </p>
       )}
 

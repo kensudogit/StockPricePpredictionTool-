@@ -6,6 +6,7 @@ import { ChatAssistantPanel } from "@/components/ChatAssistantPanel";
 import { InsightPanel } from "@/components/InsightPanel";
 import { IntegratedAnalysisPanel } from "@/components/IntegratedAnalysisPanel";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { formatBlockReason, isGateHoldMessage } from "@/lib/gate";
 import { TradePanel } from "@/components/TradePanel";
 import { UsageGuidePanel } from "@/components/UsageGuidePanel";
 import {
@@ -187,7 +188,9 @@ export default function DashboardPage() {
       const r = await refresh();
       if (r.softError) setError(r.softError);
     } catch (e) {
-      setError(e instanceof Error ? e.message : label + " 失敗");
+      const msg = e instanceof Error ? e.message : label + " 失敗";
+      if (isGateHoldMessage(msg)) setMessage(`見送り: ${formatBlockReason(msg)}`);
+      else setError(msg);
     } finally {
       setBusy(false);
     }
@@ -284,7 +287,22 @@ export default function DashboardPage() {
         >
           データ取込
         </button>
-        <button className={styles.btnGhost} disabled={busy} onClick={() => run("ファンダ取込", () => api.fundamentalsIngest(ticker))}>
+        <button
+          className={styles.btnGhost}
+          disabled={busy}
+          onClick={() =>
+            run("ファンダ取込", async () => {
+              const res = await api.fundamentalsIngest(ticker);
+              setFundamentals(res);
+              if (res.per == null && res.pbr == null && res.roe == null) {
+                return `ファンダ: 数値なし（${res.meta?.note ?? res.source ?? "yahoo"}）`;
+              }
+              return `ファンダ取得: PER ${res.per ?? "—"} / PBR ${res.pbr ?? "—"} / ROE ${
+                res.roe != null ? `${(res.roe * 100).toFixed(1)}%` : "—"
+              }`;
+            })
+          }
+        >
           ファンダ
         </button>
         <button className={styles.btnGhost} disabled={busy} onClick={() => run("ニュース収集", () => api.newsCollect(ticker))}>
@@ -348,7 +366,7 @@ export default function DashboardPage() {
               setProfitPlan(res.plan);
               return res.plan.ok
                 ? `利益関門通過: ${res.plan.action} · 推奨 ${res.plan.suggested_qty ?? 0}株`
-                : `見送り: ${res.plan.block_reason ?? "edge not ok"}`;
+                : `見送り: ${formatBlockReason(res.plan.block_reason)}`;
             })
           }
         >
@@ -522,7 +540,16 @@ export default function DashboardPage() {
         </button>
       </section>
 
-      {(message || error) && <p className={error ? styles.error : styles.message}>{error || message}</p>}
+      {(message || error) && (() => {
+        const raw = error || message || "";
+        const hold = isGateHoldMessage(raw);
+        const text = hold
+          ? `見送り: ${formatBlockReason(raw.replace(/^見送り[:：]\s*/, ""))}`
+          : raw;
+        return (
+          <p className={hold ? styles.notice : error ? styles.error : styles.message}>{text}</p>
+        );
+      })()}
 
       {(allocation || expectancy) && (
         <p className={styles.message}>
@@ -612,6 +639,9 @@ export default function DashboardPage() {
                 order_type: orderType,
                 limit_price: limitPrice,
               });
+              if (res.ok === false) {
+                return `見送り: ${formatBlockReason(res.error)}`;
+              }
               return `${side === "buy" ? "買" : "売"}い約定: ${res.quantity}株 @ ${
                 res.avg_fill_price ?? "—"
               }（${res.broker}/${res.mode} · #${res.order_id}）`;
@@ -649,6 +679,12 @@ export default function DashboardPage() {
                 <li><span>ROA</span><strong className={styles.mono}>{fundamentals.roa != null ? (fundamentals.roa * 100).toFixed(1) + "%" : "—"}</strong></li>
                 <li><span>EPS</span><strong className={styles.mono}>{fundamentals.eps?.toFixed(2) ?? "—"}</strong></li>
                 <li><span>営業利益率</span><strong className={styles.mono}>{fundamentals.operating_margin != null ? (fundamentals.operating_margin * 100).toFixed(1) + "%" : "—"}</strong></li>
+                {fundamentals.source ? (
+                  <li><span>出典</span><strong>{fundamentals.source}</strong></li>
+                ) : null}
+                {fundamentals.per == null && fundamentals.pbr == null && fundamentals.meta?.note ? (
+                  <li className={styles.empty}>{fundamentals.meta.note}</li>
+                ) : null}
               </>
             ) : (
               <li className={styles.empty}>「ファンダ」で取得</li>

@@ -12,6 +12,7 @@ describe("TypeScript source inventory", () => {
     "app/page.tsx",
     "app/layout.tsx",
     "lib/api.ts",
+    "lib/gate.ts",
     "components/AnalysisCharts.tsx",
     "components/LoadingSpinner.tsx",
   ];

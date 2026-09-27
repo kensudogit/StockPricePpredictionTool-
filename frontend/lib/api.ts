@@ -236,6 +236,9 @@ export type Fundamentals = {
   operating_margin?: number | null;
   equity_ratio?: number | null;
   market_cap?: number | null;
+  source?: string;
+  as_of_date?: string;
+  meta?: { note?: string; page?: string; name?: string };
 };
 
 export type NewsItem = {
@@ -491,14 +494,16 @@ export const api = {
   }) =>
     request<{
       ok: boolean;
-      order_id: number;
-      broker: string;
-      status: string;
-      side: string;
-      quantity: number;
+      blocked?: boolean;
+      error?: string;
+      order_id?: number;
+      broker?: string;
+      status?: string;
+      side?: string;
+      quantity?: number;
       avg_fill_price?: number | null;
-      mode: string;
-      ticker: string;
+      mode?: string;
+      ticker?: string;
     }>("/brokers/order", { method: "POST", body: JSON.stringify(body) }),
   insight: (ticker: string) =>
     request<InsightResult>("/insight", {

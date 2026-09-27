@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
+import { formatBlockReason } from "@/lib/gate";
 import type { InsightResult } from "@/lib/api";
 import styles from "./insight.module.css";
 
@@ -83,7 +84,11 @@ export function InsightPanel({ data }: Props) {
             ? ` · OOS hit ${(ev.direction_hit_rate * 100).toFixed(1)}%`
             : ""}
           {edge?.suggested_qty ? ` · 推奨 ${edge.suggested_qty}株` : ""}
-          {edge?.block_reason ? ` · ${edge.block_reason}` : ev?.block_reason ? ` · ${ev.block_reason}` : ""}
+          {edge?.block_reason
+            ? ` · ${formatBlockReason(edge.block_reason)}`
+            : ev?.block_reason
+              ? ` · ${formatBlockReason(ev.block_reason)}`
+              : ""}
         </p>
       )}
 

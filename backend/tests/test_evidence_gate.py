@@ -36,7 +36,7 @@ class TestEvidence(unittest.TestCase):
         wf = evaluate_walk_forward(_ohlcv(80), min_train=40, max_points=5)
         ev = summarize_walk_forward(wf, min_samples=20, min_hit_rate=0.52)
         self.assertFalse(ev["ok"])
-        self.assertIn("oos_samples", ev["block_reason"] or "")
+        self.assertIn("検証日数", ev["block_reason"] or "")
 
     def test_build_ols_evidence_has_hit_rate(self):
         ev = build_ols_evidence(_ohlcv(120), min_samples=5, min_hit_rate=0.0)
@@ -65,7 +65,7 @@ class TestEvidence(unittest.TestCase):
         }
         merged = merge_robust_evidence(short, long, min_expected_value=0.0008, min_hit_z=1.0)
         self.assertFalse(merged["ok"])
-        self.assertIn("long", merged["block_reason"] or "")
+        self.assertIn("確認窓", merged["block_reason"] or "")
 
     def test_ols_signal_backtest_strategy(self):
         out = run_ols_signal_backtest(_ohlcv(100), fee_bps=5)

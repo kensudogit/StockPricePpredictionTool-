@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TechnicalResponse } from "@/lib/api";
+import { formatBlockReason, isGateHoldMessage } from "@/lib/gate";
 
 describe("TechnicalResponse shape", () => {
   it("accepts snapshot fields used by dashboard", () => {
@@ -46,5 +47,17 @@ describe("tv symbol helper logic", () => {
 
   it("maps Nikkei index", () => {
     expect(tvSymbolFor("^N225")).toBe("TVC:NI225");
+  });
+});
+
+describe("gate hold copy", () => {
+  it("translates English dual-window dump", () => {
+    const raw =
+      "min(short_ev,long_ev)=0.000066 < 0.00080; long oos_strategy_return <= 0; long hit_z -1.00 < 1.00; 20d momentum not up";
+    expect(isGateHoldMessage(raw)).toBe(true);
+    const ja = formatBlockReason(raw);
+    expect(ja).toContain("期待値");
+    expect(ja).toContain("モメンタム");
+    expect(ja).not.toContain("short_ev");
   });
 });

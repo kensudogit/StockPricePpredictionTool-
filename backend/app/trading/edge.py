@@ -46,41 +46,41 @@ def assess_edge(
 
     reasons: list[str] = []
     if not evd.get("ok"):
-        reasons.append(str(evd.get("block_reason") or "OOS evidence not ok"))
+        reasons.append(str(evd.get("block_reason") or "検証データが関門を満たさない"))
     if s.require_positive_oos_return and oos_ret <= 0:
-        reasons.append(f"oos_strategy_return {oos_ret:.4f} <= 0 after fees")
+        reasons.append(f"検証リターンがマイナス（{oos_ret:.2%}）")
     if sharpe < s.min_oos_sharpe:
-        reasons.append(f"oos_sharpe {sharpe:.2f} < {s.min_oos_sharpe:.2f}")
+        reasons.append(f"Sharpe {sharpe:.2f} が下限 {s.min_oos_sharpe:.2f} 未満")
     if expected < s.min_expected_value:
-        reasons.append(f"expected_value {expected:.5f} < {s.min_expected_value:.5f}")
+        reasons.append(f"期待値 {expected * 10000:.1f}bps が下限 {s.min_expected_value * 10000:.1f}bps 未満")
     min_move = 2.0 * fee + float(s.min_expected_value)
     if abs(pred_ret) < min_move:
-        reasons.append(f"|predicted_return| {abs(pred_ret):.5f} < cost+edge {min_move:.5f}")
+        reasons.append(f"予想値幅 {abs(pred_ret):.2%} がコスト込み下限 {min_move:.2%} 未満")
     if direction not in {"up", "down"}:
-        reasons.append("direction missing")
+        reasons.append("方向が出ていない")
 
     trend = (trend or "unknown").lower()
     if s.require_trend_align:
         if direction == "up" and trend == "downtrend":
-            reasons.append("counter-trend long blocked")
+            reasons.append("株価トレンドと逆の買い")
         if direction == "down" and trend == "uptrend":
-            reasons.append("counter-trend short blocked")
+            reasons.append("株価トレンドと逆の売り")
     idx = (index_trend or "unknown").lower()
     if s.require_index_align and idx in {"uptrend", "downtrend"}:
         if direction == "up" and idx == "downtrend":
-            reasons.append("index downtrend blocks long")
+            reasons.append("日経平均が下降中のため買い見送り")
         if direction == "down" and idx == "uptrend":
-            reasons.append("index uptrend blocks short")
+            reasons.append("日経平均が上昇中のため売り見送り")
     if s.require_momentum_align and mom_return is not None:
         if direction == "up" and mom_return <= 0:
-            reasons.append("20d momentum not up")
+            reasons.append("20日モメンタムが上向きでない")
         if direction == "down" and mom_return >= 0:
-            reasons.append("20d momentum not down")
+            reasons.append("20日モメンタムが下向きでない")
     if rsi is not None:
         if direction == "up" and rsi >= s.rsi_overbought:
-            reasons.append(f"RSI {rsi:.1f} overbought")
+            reasons.append(f"RSI {rsi:.1f} は買われすぎ")
         if direction == "down" and rsi <= s.rsi_oversold:
-            reasons.append(f"RSI {rsi:.1f} oversold")
+            reasons.append(f"RSI {rsi:.1f} は売られすぎ")
 
     ok = not reasons
     action = "hold"
@@ -111,7 +111,7 @@ def assess_edge(
             qty = min(qty, equity * kelly / price)
         qty = round_to_lot(qty, lot)
         if qty < lot:
-            reasons.append(f"qty below lot {lot}")
+            reasons.append(f"数量が東証単元 {lot} 株に満たない")
             ok = False
             action = "hold"
             qty = 0.0

@@ -53,9 +53,9 @@ def summarize_walk_forward(
 
     reasons: list[str] = []
     if n < min_samples:
-        reasons.append(f"oos_samples {n} < {min_samples}")
+        reasons.append(f"検証日数が足りない（{n}日 < {min_samples}日）")
     if hit + 1e-12 < min_hit_rate:
-        reasons.append(f"direction_hit_rate {hit:.3f} < {min_hit_rate:.3f}")
+        reasons.append(f"方向的中 {hit:.1%} が下限 {min_hit_rate:.1%} 未満")
 
     ok = not reasons
     return {
@@ -122,20 +122,20 @@ def merge_robust_evidence(
     """Require the short window and a longer confirm window to agree on edge."""
     reasons: list[str] = []
     if not short.get("ok"):
-        reasons.append(f"short: {short.get('block_reason') or 'not ok'}")
+        reasons.append(f"直近60日: {short.get('block_reason') or '未通過'}")
     if not long.get("ok"):
-        reasons.append(f"long: {long.get('block_reason') or 'not ok'}")
+        reasons.append(f"確認120日: {long.get('block_reason') or '未通過'}")
     short_ev = float(short.get("expected_value") or 0.0)
     long_ev = float(long.get("expected_value") or 0.0)
     if min(short_ev, long_ev) < min_expected_value:
         reasons.append(
-            f"min(short_ev,long_ev) {min(short_ev, long_ev):.5f} < {min_expected_value:.5f}"
+            f"期待値 {min(short_ev, long_ev) * 10000:.1f}bps が下限 {min_expected_value * 10000:.1f}bps 未満"
         )
     if float(long.get("oos_strategy_return") or 0.0) <= 0:
-        reasons.append("long oos_strategy_return <= 0")
+        reasons.append("確認窓の手数料後リターンがマイナス")
     long_z = float(long.get("hit_z") or 0.0)
     if long_z < min_hit_z:
-        reasons.append(f"long hit_z {long_z:.2f} < {min_hit_z:.2f}")
+        reasons.append(f"確認窓の的中信頼度 z={long_z:.2f} < {min_hit_z:.2f}")
 
     out = dict(short)
     out["kind"] = "walk_forward_dual"

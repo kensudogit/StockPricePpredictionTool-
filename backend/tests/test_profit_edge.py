@@ -53,7 +53,7 @@ class TestAssessEdge(unittest.TestCase):
             settings=_settings(),
         )
         self.assertEqual(plan["action"], "hold")
-        self.assertIn("counter-trend", plan["block_reason"] or "")
+        self.assertIn("逆", plan["block_reason"] or "")
 
     def test_hold_when_move_smaller_than_cost(self):
         plan = assess_edge(
@@ -96,7 +96,7 @@ class TestAssessEdge(unittest.TestCase):
             settings=_settings(),
         )
         self.assertEqual(plan["action"], "hold")
-        self.assertIn("index downtrend", plan["block_reason"] or "")
+        self.assertIn("日経", plan["block_reason"] or "")
 
     def test_hold_against_momentum(self):
         plan = assess_edge(
@@ -110,7 +110,7 @@ class TestAssessEdge(unittest.TestCase):
             settings=_settings(),
         )
         self.assertEqual(plan["action"], "hold")
-        self.assertIn("momentum", plan["block_reason"] or "")
+        self.assertIn("モメンタム", plan["block_reason"] or "")
 
     def test_jp_lot_rounding(self):
         risk = EnhancedRiskManager(MagicMock())

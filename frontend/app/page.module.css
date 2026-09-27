@@ -161,16 +161,26 @@ button.pill {
   cursor: not-allowed;
 }
 
-.message {
+.message,
+.notice,
+.error {
   margin-bottom: 1rem;
-  color: var(--accent);
   font-size: 0.9rem;
+  line-height: 1.55;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  color: var(--accent);
+}
+
+.notice {
+  color: var(--warn);
 }
 
 .error {
-  margin-bottom: 1rem;
   color: var(--danger);
-  font-size: 0.9rem;
 }
 
 .grid {

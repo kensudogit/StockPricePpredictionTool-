@@ -153,13 +153,13 @@ async def fundamentals_ingest(body: TickerBody, db: AsyncSession = Depends(get_d
 @router.get("/fundamentals/{ticker}")
 async def fundamentals_get(ticker: str, db: AsyncSession = Depends(get_db)):
     data = await FundamentalService(db).latest(ticker)
-    if not data:
-        # auto-ingest once then re-read
+    empty = not data or not any(data.get(k) is not None for k in ("per", "pbr", "roe", "eps"))
+    if empty:
         try:
             await FundamentalService(db).ingest(ticker)
             data = await FundamentalService(db).latest(ticker)
         except Exception:
-            data = None
+            data = data or None
     if not data:
         return {
             "ticker": ticker,
@@ -610,10 +610,12 @@ async def brokers_order(body: BrokerOrderBody, db: AsyncSession = Depends(get_db
     if body.enforce_edge:
         plan, _ = await _edge_plan(db, body.ticker)
         if plan and plan.get("action") != body.side.lower():
-            raise HTTPException(
-                400,
-                plan.get("block_reason") or f"profit gate is {plan.get('action')}, not {body.side}",
-            )
+            return {
+                "ok": False,
+                "blocked": True,
+                "error": plan.get("block_reason") or f"利益関門は{plan.get('action')}、注文は{body.side}",
+                "edge": plan,
+            }
         if plan and plan.get("suggested_qty") and body.quantity <= 0:
             body.quantity = float(plan["suggested_qty"])
 
