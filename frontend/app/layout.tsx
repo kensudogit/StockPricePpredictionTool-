@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "StockAI Agent",
   description: "株価予測・売買判断・リスク管理・SNS運用ダッシュボード",
+  icons: {
+    icon: "/PC.png",
+    apple: "/PC.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

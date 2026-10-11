@@ -205,7 +205,10 @@ export default function DashboardPage() {
       ) : null}
       <header className={styles.hero}>
         <div className={styles.brandBlock}>
-          <p className={styles.brand}>StockAI</p>
+          <p className={styles.brand}>
+            <img src="/PC.png" alt="" className={styles.logo} width={28} height={28} />
+            StockAI
+          </p>
           <h1 className={styles.headline}>分析・予測・売買・バックテストを一つの画面で。</h1>
           <p className={styles.sub}>
             テクニカル / ファンダ / ニュースLLM / ML・DL / RAG / リスク / 証券API

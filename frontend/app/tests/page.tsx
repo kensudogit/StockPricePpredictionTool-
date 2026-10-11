@@ -97,8 +97,11 @@ export default function TestsPage() {
         </div>
       ) : null}
       <header className={styles.hero}>
-        <div>
-          <p className={styles.brand}>StockAI</p>
+        <div className={styles.brandBlock}>
+          <p className={styles.brand}>
+            <img src="/PC.png" alt="" className={styles.logo} width={28} height={28} />
+            StockAI
+          </p>
           <h1 className={styles.headline}>テスト結果</h1>
           <p className={styles.sub}>Python (pytest) / TypeScript (vitest) の実行結果を確認できます。</p>
         </div>
