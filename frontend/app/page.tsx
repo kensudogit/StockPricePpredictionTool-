@@ -39,15 +39,18 @@ const DEFAULT_TICKER = "7203.T";
 function tvSymbolFor(ticker: string) {
   // TradingView embed: TSE: works for Tokyo listed equities
   if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
+  if (ticker.endsWith("=X")) return `FX:${ticker.replace("=X", "")}`;
   if (ticker.startsWith("^")) {
     const map: Record<string, string> = {
       "^N225": "TVC:NI225",
+      "^TOPX": "TSE:TOPIX",
       "^GSPC": "SP:SPX",
       "^IXIC": "NASDAQ:IXIC",
       "^VIX": "TVC:VIX",
     };
     return map[ticker] || ticker.replace("^", "");
   }
+  if (ticker === "CL=F") return "TVC:USOIL";
   return ticker;
 }
 

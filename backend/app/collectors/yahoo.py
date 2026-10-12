@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import httpx
 import yfinance as yf
 
 from app.collectors.base import Bar, MarketDataProvider, QuotePoint
+
+# Yahoo が指数コードを返さない銘柄の代替（価格は指数の近似）
+YAHOO_ALIASES: dict[str, list[str]] = {
+    "^TOPX": ["1306.T", "1305.T", "1348.T"],
+}
 
 logger = logging.getLogger("stockai.yahoo")
 
@@ -161,10 +167,20 @@ class YahooFinanceProvider(MarketDataProvider):
         return bars
 
     async def fetch_bars(self, ticker: str, timeframe: str = "1d", limit: int = 100) -> list[Bar]:
-        bars = await self._fetch_chart_api(ticker, timeframe, limit)
-        if bars:
-            return bars
-        return await self._fetch_yfinance(ticker, timeframe, limit)
+        seen: list[str] = []
+        for cand in [ticker, *YAHOO_ALIASES.get(ticker, [])]:
+            if cand in seen:
+                continue
+            seen.append(cand)
+            bars = await self._fetch_chart_api(cand, timeframe, limit)
+            if not bars:
+                bars = await self._fetch_yfinance(cand, timeframe, limit)
+            if bars:
+                if cand != ticker:
+                    logger.info("yahoo alias %s -> %s (%s bars)", ticker, cand, len(bars))
+                    bars = [replace(b, ticker=ticker) for b in bars]
+                return bars
+        return []
 
     async def fetch_quote(self, series_code: str) -> QuotePoint | None:
         bars = await self.fetch_bars(series_code, timeframe="1d", limit=1)

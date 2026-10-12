@@ -31,6 +31,59 @@ class TestCollectorsRegistry(unittest.TestCase):
         p = get_primary_provider()
         self.assertIsInstance(p, MarketDataProvider)
 
+    def test_topix_macro_uses_topx(self):
+        self.assertEqual(MACRO_SERIES["TOPIX"], "^TOPX")
+
+
+class TestYahooAliases(unittest.TestCase):
+    def test_topix_has_etf_fallback(self):
+        from app.collectors.yahoo import YAHOO_ALIASES
+
+        self.assertIn("1306.T", YAHOO_ALIASES["^TOPX"])
+
+    def test_fetch_bars_retries_alias_and_keeps_requested_ticker(self):
+        import asyncio
+        from datetime import datetime, timezone
+
+        from app.collectors.base import Bar
+        from app.collectors.yahoo import YahooFinanceProvider
+
+        provider = YahooFinanceProvider()
+        proxy = Bar(
+            ticker="1306.T",
+            timeframe="1d",
+            ts=datetime(2026, 1, 5, tzinfo=timezone.utc),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+            source="yahoo",
+        )
+
+        async def empty(*_a, **_k):
+            return []
+
+        async def alias_bars(ticker, timeframe, limit):
+            return [proxy] if ticker == "1306.T" else []
+
+        async def _run():
+            provider._fetch_chart_api = empty  # type: ignore[method-assign]
+            provider._fetch_yfinance = alias_bars  # type: ignore[method-assign]
+            bars = await provider.fetch_bars("^TOPX", limit=5)
+            self.assertEqual(len(bars), 1)
+            self.assertEqual(bars[0].ticker, "^TOPX")
+
+        asyncio.run(_run())
+
+
+class TestStooqSymbols(unittest.TestCase):
+    def test_topix_maps_to_topix_etf(self):
+        from app.collectors.stooq import to_stooq_symbol
+
+        self.assertEqual(to_stooq_symbol("^TOPX"), "1306.jp")
+        self.assertEqual(to_stooq_symbol("7203.T"), "7203.jp")
+
 
 class TestCommercialStubs(unittest.TestCase):
     def test_jpx_health_false(self):

@@ -29,15 +29,18 @@ describe("TechnicalResponse shape", () => {
 describe("tv symbol helper logic", () => {
   function tvSymbolFor(ticker: string) {
     if (ticker.endsWith(".T")) return `TSE:${ticker.replace(".T", "")}`;
+    if (ticker.endsWith("=X")) return `FX:${ticker.replace("=X", "")}`;
     if (ticker.startsWith("^")) {
       const map: Record<string, string> = {
         "^N225": "TVC:NI225",
+        "^TOPX": "TSE:TOPIX",
         "^GSPC": "SP:SPX",
         "^IXIC": "NASDAQ:IXIC",
         "^VIX": "TVC:VIX",
       };
       return map[ticker] || ticker.replace("^", "");
     }
+    if (ticker === "CL=F") return "TVC:USOIL";
     return ticker;
   }
 
@@ -47,6 +50,10 @@ describe("tv symbol helper logic", () => {
 
   it("maps Nikkei index", () => {
     expect(tvSymbolFor("^N225")).toBe("TVC:NI225");
+  });
+
+  it("maps TOPIX to TSE:TOPIX instead of TOPX", () => {
+    expect(tvSymbolFor("^TOPX")).toBe("TSE:TOPIX");
   });
 });
 

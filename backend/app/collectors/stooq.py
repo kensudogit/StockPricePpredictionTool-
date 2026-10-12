@@ -26,6 +26,7 @@ def to_stooq_symbol(ticker: str) -> str | None:
     # Indices on Stooq
     index_map = {
         "^N225": "^nkx",
+        "^TOPX": "1306.jp",
         "^GSPC": "^spx",
         "^IXIC": "^ndq",
         "^VIX": "^vix",

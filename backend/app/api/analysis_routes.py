@@ -248,7 +248,7 @@ async def news_enrich(article_id: int, db: AsyncSession = Depends(get_db)):
 async def ml_predict(body: MLPredictBody, db: AsyncSession = Depends(get_db)):
     df = await _ensure_bars(db, body.ticker, min_rows=60)
     if len(df) < 40:
-        raise HTTPException(400, "Insufficient bars after ingest. Check Yahoo Finance availability.")
+        raise HTTPException(400, "価格データが足りません。データ取込を実行するか、別の銘柄を選んでください。")
     return {"ticker": body.ticker, **MLEnsembleService().predict(df, models=body.models)}
 
 
@@ -256,7 +256,7 @@ async def ml_predict(body: MLPredictBody, db: AsyncSession = Depends(get_db)):
 async def dl_predict(body: DLPredictBody, db: AsyncSession = Depends(get_db)):
     df = await _ensure_bars(db, body.ticker, min_rows=60)
     if len(df) < 40:
-        raise HTTPException(400, "Insufficient bars after ingest. Check Yahoo Finance availability.")
+        raise HTTPException(400, "価格データが足りません。データ取込を実行するか、別の銘柄を選んでください。")
     result = DeepLearningService().predict(
         df, model=body.model, backend=body.backend, epochs=body.epochs
     )
@@ -267,7 +267,7 @@ async def dl_predict(body: DLPredictBody, db: AsyncSession = Depends(get_db)):
 async def backtest_run(body: BacktestBody, db: AsyncSession = Depends(get_db)):
     df = await _ensure_bars(db, body.ticker, min_rows=80, limit=500)
     if len(df) < 50:
-        raise HTTPException(400, "Need at least 50 bars for backtest. Ingest may have failed.")
+        raise HTTPException(400, "バックテストには50本以上必要です。データ取込を実行してください。")
     svc = BacktestService(db)
     # Prefer pandas engine when vectorbt unavailable
     engine = body.engine
